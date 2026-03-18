@@ -17,7 +17,7 @@ var pipelineStatus struct {
 
 func apiFullPipeline(c *gin.Context) {
 	var req struct {
-		Path       string   `json:"path"`
+		Paths      []string `json:"paths"`
 		Similarity float64  `json:"similarity"`
 		Strategies []string `json:"strategies"`
 	}
@@ -52,7 +52,7 @@ func apiFullPipeline(c *gin.Context) {
 		}()
 
 		// 1. Scan
-		doScan(req.Path)
+		doScan(req.Paths)
 		for {
 			scanProgress.RLock()
 			running := scanProgress.IsRunning
@@ -78,25 +78,9 @@ func apiFullPipeline(c *gin.Context) {
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
-
-		// 3. Delete
-		pipelineStatus.Lock()
-		pipelineStatus.Stage = "delete"
-		pipelineStatus.Unlock()
-		
-		doAutoDelete(req.Strategies)
-		for {
-			autoProgress.RLock()
-			running := autoProgress.IsRunning
-			autoProgress.RUnlock()
-			if !running {
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
 	}()
 
-	c.JSON(http.StatusOK, gin.H{"message": "Full pipeline started"})
+	c.JSON(http.StatusOK, gin.H{"message": "Search started"})
 }
 
 func apiPipelineProgress(c *gin.Context) {

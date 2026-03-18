@@ -44,7 +44,15 @@ func doAutoDelete(strategies []string) {
 	}()
 
 	if len(strategies) == 0 {
-		strategies = []string{"quality", "size_desc"}
+		var conf AppConfig
+		if err := db.Where("key = ?", "default_delete_strategy").First(&conf).Error; err == nil {
+			strategies = strings.Split(conf.Value, ",")
+			for i := range strategies {
+				strategies[i] = strings.TrimSpace(strategies[i])
+			}
+		} else {
+			strategies = []string{"quality", "size_desc"}
+		}
 	}
 
 	var allFiles []SongFile

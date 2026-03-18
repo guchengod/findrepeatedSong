@@ -1,516 +1,617 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Search, Activity, Trash2, CheckCircle, ChevronRight, Zap, Loader2, Clock, ArrowUp, ArrowDown, X } from 'lucide-react';
+import { 
+  Activity, Trash2, 
+  Loader2, FolderTree, 
+  Settings, Calendar, Sparkles
+} from 'lucide-react';
 
 interface SongFile {
   id: number;
   path: string;
   filename: string;
+  artist: string;
+  album: string;
+  title: string;
   normalizedName: string;
   size: number;
   ext: string;
   groupId: string;
 }
 
+interface AppConfig {
+  key: string;
+  value: string;
+  desc: string;
+}
+
+interface ScheduleTask {
+  id: number;
+  name: string;
+  cron: string;
+  isActive: boolean;
+  lastRun: string;
+}
+
 const API_BASE = '/api';
 
-const AVAILABLE_STRATEGIES = [
-  { id: 'quality', name: 'Lossless First', description: 'Prefer FLAC/WAV/APE' },
-  { id: 'size_desc', name: 'Largest Size', description: 'Prefer bigger files' },
-  { id: 'size_asc', name: 'Smallest Size', description: 'Prefer smaller files' },
-];
-
 function App() {
-  const [activeTab, setActiveTab] = useState<'manual' | 'auto'>('manual');
-  const [activeStep, setActiveStep] = useState(1);
-  const [scanPath, setScanPath] = useState('');
-  const [similarity, setSimilarity] = useState(0.8);
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(['quality', 'size_desc']);
+  const [activeMenu, setActiveMenu] = useState<'deduper' | 'organizer' | 'completer' | 'scheduler' | 'settings'>('deduper');
+  const [configs, setConfigs] = useState<AppConfig[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
   
+  // Progress States
   const [scanProgress, setScanProgress] = useState({ isRunning: false, scanned: 0, message: '' });
   const [analyzeProgress, setAnalyzeProgress] = useState({ isRunning: false, percent: 0, message: '' });
-  const [autoProgress, setAutoProgress] = useState({ isRunning: false, percent: 0, message: '' });
   const [pipelineProgress, setPipelineProgress] = useState({ isRunning: false, stage: '', elapsed: 0 });
-  const [duplicateGroups, setDuplicateGroups] = useState<SongFile[][]>([]);
+  const [orgStatus, setOrgStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
+  const [completeStatus, setCompleteStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
+  const [autoProgress, setAutoProgress] = useState({ isRunning: false, percent: 0, message: '' });
 
-  const isStep1Done = !scanProgress.isRunning && scanProgress.scanned > 0;
-  const isStep2Done = !analyzeProgress.isRunning && analyzeProgress.percent === 100;
+  const [duplicateGroups, setDuplicateGroups] = useState<SongFile[][]>([]);
+  const [totalGroups, setTotalGroups] = useState(0);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  
+  const [similarity, setSimilarity] = useState(0.8);
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>(['source_path']);
+
+  // View specific states (Lifted to top level to follow Hook rules)
+  const [organizeMode, setOrganizeMode] = useState<'move' | 'copy'>('move');
 
   useEffect(() => {
-    let interval: any;
-    if (scanProgress.isRunning || analyzeProgress.isRunning || autoProgress.isRunning || pipelineProgress.isRunning) {
-      interval = setInterval(async () => {
-        try {
-          if (scanProgress.isRunning) {
-            const res = await axios.get(`${API_BASE}/scan/progress`);
-            setScanProgress(res.data);
-          }
-          if (analyzeProgress.isRunning) {
-            const res = await axios.get(`${API_BASE}/analyze/progress`);
-            setAnalyzeProgress(res.data);
-          }
-          if (autoProgress.isRunning) {
-            const res = await axios.get(`${API_BASE}/auto-delete/progress`);
-            setAutoProgress(res.data);
-            if (!res.data.isRunning && res.data.percent === 100) {
-              loadGroups();
-            }
-          }
-          if (pipelineProgress.isRunning || activeTab === 'auto') {
-            const res = await axios.get(`${API_BASE}/pipeline/progress`);
-            setPipelineProgress(res.data);
-          }
-        } catch (e) {
-          console.error('Polling error', e);
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [scanProgress.isRunning, analyzeProgress.isRunning, autoProgress.isRunning, pipelineProgress.isRunning, activeTab]);
+    loadConfigs();
+    loadSchedules();
+    loadGroups();
+  }, []);
 
-  const startScan = async () => {
-    try {
-      await axios.post(`${API_BASE}/scan`, { path: scanPath });
-      setScanProgress({ isRunning: true, scanned: 0, message: 'Starting...' });
-    } catch (e) {
-      alert('Failed to start scan');
+  useEffect(() => {
+    if (configs.length > 0 && selectedStrategies.length === 0) {
+      const def = getConfig('default_delete_strategy');
+      if (def) setSelectedStrategies(def.split(',').map(s => s.trim()));
     }
+  }, [configs]);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        if (pipelineProgress.isRunning) {
+          const res = await axios.get(`${API_BASE}/pipeline/progress`);
+          setPipelineProgress(res.data);
+          if (!res.data.isRunning) {
+             loadGroups();
+          }
+        }
+        
+        const pipeRes = await axios.get(`${API_BASE}/pipeline/progress`);
+        if (pipeRes.data.isRunning) {
+            if (pipeRes.data.stage === 'scan') {
+                const s = await axios.get(`${API_BASE}/scan/progress`);
+                setScanProgress(s.data);
+            } else if (pipeRes.data.stage === 'analyze') {
+                const a = await axios.get(`${API_BASE}/analyze/progress`);
+                setAnalyzeProgress(a.data);
+            }
+        } else {
+            setScanProgress(p => ({...p, isRunning: false}));
+            setAnalyzeProgress(p => ({...p, isRunning: false}));
+        }
+
+        if (orgStatus.isRunning) {
+          const res = await axios.get(`${API_BASE}/organize/status`);
+          setOrgStatus(res.data);
+        }
+        if (completeStatus.isRunning) {
+          const res = await axios.get(`${API_BASE}/complete/status`);
+          setCompleteStatus(res.data);
+        }
+        if (autoProgress.isRunning) {
+          const res = await axios.get(`${API_BASE}/auto-delete/progress`);
+          setAutoProgress(res.data);
+          if (!res.data.isRunning) loadGroups();
+        }
+      } catch (e) { console.error(e); }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [pipelineProgress, orgStatus, completeStatus, autoProgress]);
+
+  const loadConfigs = async () => {
+    const res = await axios.get(`${API_BASE}/config`);
+    setConfigs(res.data);
   };
 
-  const startAnalyze = async () => {
-    try {
-      await axios.post(`${API_BASE}/analyze`, { similarity });
-      setAnalyzeProgress({ isRunning: true, percent: 0, message: 'Starting...' });
-    } catch (e) {
-      alert('Failed to start analysis');
-    }
+  const loadSchedules = async () => {
+    const res = await axios.get(`${API_BASE}/schedules`);
+    setSchedules(res.data);
   };
 
   const loadGroups = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/groups`);
-      setDuplicateGroups(res.data.groups || []);
-      if (activeTab === 'manual') setActiveStep(3);
-    } catch (e) {
-      alert('Failed to load results');
-    }
+    const res = await axios.get(`${API_BASE}/groups`, { params: { page, pageSize } });
+    setDuplicateGroups(res.data.groups || []);
+    setTotalGroups(res.data.total || 0);
   };
 
-  const startAutoDelete = async () => {
-    try {
-      await axios.post(`${API_BASE}/auto-delete`, { strategies: selectedStrategies });
-      setAutoProgress({ isRunning: true, percent: 0, message: 'Starting...' });
-    } catch (e) {
-      alert('Failed to start auto delete');
-    }
+  useEffect(() => {
+    loadGroups();
+  }, [page]);
+
+  const updateConfig = async (key: string, value: string) => {
+    await axios.post(`${API_BASE}/config`, { key, value });
+    loadConfigs();
   };
 
-  const startFullPipeline = async () => {
-    try {
-      await axios.post(`${API_BASE}/full-pipeline`, { path: scanPath, similarity, strategies: selectedStrategies });
-      setPipelineProgress({ isRunning: true, stage: 'scan', elapsed: 0 });
-    } catch (e) {
-      alert('Failed to start full pipeline');
-    }
+  const updateSchedule = async (task: ScheduleTask) => {
+    await axios.post(`${API_BASE}/schedules`, task);
+    loadSchedules();
   };
 
-  const deleteGroup = async (groupId: string, keepId: number) => {
-    try {
-      await axios.post(`${API_BASE}/delete`, { groupId, keepId });
-      setDuplicateGroups(prev => prev.filter(g => g[0].groupId !== groupId));
-    } catch (e) {
-      alert('Failed to delete');
-    }
-  };
+  const getConfig = (key: string) => configs.find(c => c.key === key)?.value || '';
 
-  const moveStrategy = (index: number, direction: 'up' | 'down') => {
-    const newStrategies = [...selectedStrategies];
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex >= 0 && targetIndex < newStrategies.length) {
-      [newStrategies[index], newStrategies[targetIndex]] = [newStrategies[targetIndex], newStrategies[index]];
-      setSelectedStrategies(newStrategies);
-    }
-  };
-
-  const toggleStrategy = (id: string) => {
-    if (selectedStrategies.includes(id)) {
-      setSelectedStrategies(prev => prev.filter(s => s !== id));
-    } else {
-      setSelectedStrategies(prev => [...prev, id]);
-    }
-  };
-
-  const formatSize = (bytes: number) => {
-    const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(2)} MB`;
-  };
-
-  const renderStrategyManager = () => (
-    <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-800 space-y-4">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Deletion Priority (Ordered)</p>
+  const renderSidebar = () => (
+    <div className="w-64 bg-gray-950 border-r border-gray-800 flex flex-col p-4 gap-2">
+      <div className="flex items-center gap-3 px-4 py-6 mb-4">
+        <Activity className="text-blue-500" />
+        <span className="font-black text-lg tracking-tighter">MUSIC ENGINE</span>
+      </div>
       
-      <div className="flex flex-wrap gap-2 mb-4">
-        {AVAILABLE_STRATEGIES.map(s => (
-          <button
-            key={s.id}
-            onClick={() => toggleStrategy(s.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-              selectedStrategies.includes(s.id) 
-                ? 'bg-blue-600/20 border-blue-500 text-blue-400' 
-                : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-600'
-            }`}
-          >
-            {s.name}
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-2">
-        {selectedStrategies.map((sid, idx) => {
-          const strategy = AVAILABLE_STRATEGIES.find(s => s.id === sid);
-          return (
-            <div key={sid} className="bg-gray-800 p-3 rounded-lg flex items-center justify-between group">
-              <div className="flex items-center gap-3">
-                <span className="bg-gray-700 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full text-gray-400">
-                  {idx + 1}
-                </span>
-                <span className="text-sm font-bold text-gray-300">{strategy?.name}</span>
-              </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => moveStrategy(idx, 'up')} disabled={idx === 0} className="p-1 hover:text-blue-400 disabled:text-gray-700">
-                  <ArrowUp size={14} />
-                </button>
-                <button onClick={() => moveStrategy(idx, 'down')} disabled={idx === selectedStrategies.length - 1} className="p-1 hover:text-blue-400 disabled:text-gray-700">
-                  <ArrowDown size={14} />
-                </button>
-                <button onClick={() => toggleStrategy(sid)} className="p-1 hover:text-red-400 ml-1">
-                  <X size={14} />
-                </button>
-              </div>
-            </div>
-          );
-        })}
-        {selectedStrategies.length === 0 && (
-          <p className="text-xs text-gray-600 italic text-center py-2">No strategies selected. Quality first by default.</p>
-        )}
-      </div>
+      {[
+        { id: 'deduper', label: '去重 (Deduper)', icon: Trash2 },
+        { id: 'organizer', label: '整理 (Organizer)', icon: FolderTree },
+        { id: 'completer', label: '补全 (Completer)', icon: Sparkles },
+        { id: 'scheduler', label: '定时 (Scheduler)', icon: Calendar },
+        { id: 'settings', label: '设置 (Settings)', icon: Settings },
+      ].map(item => (
+        <button
+          key={item.id}
+          onClick={() => setActiveMenu(item.id as any)}
+          className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
+            activeMenu === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
+          }`}
+        >
+          <item.icon size={18} />
+          {item.label}
+        </button>
+      ))}
     </div>
   );
 
-  const renderStepHeader = (num: number, title: string, isClickable: boolean) => (
-    <button
-      onClick={() => isClickable && setActiveStep(num)}
-      disabled={!isClickable}
-      className={`flex items-center gap-2 pb-2 border-b-2 transition-all ${
-        activeStep === num ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-500 hover:text-gray-300'
-      } ${!isClickable ? 'opacity-30 cursor-not-allowed' : ''}`}
-    >
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-        activeStep === num ? 'bg-blue-500 text-white' : 'bg-gray-700'
-      }`}>
-        {num}
-      </span>
-      {title}
-    </button>
-  );
+  const renderDeduper = () => {
+    const startCombinedSearch = async () => {
+      const paths = selectedPaths.map(p => getConfig(p)).filter(p => p !== '');
+      if (paths.length === 0) return alert('请选择一个有效路径');
+      await axios.post(`${API_BASE}/full-pipeline`, { paths, similarity });
+      setPipelineProgress({ isRunning: true, stage: 'scan', elapsed: 0 });
+    };
 
-  return (
-    <div className="min-h-screen text-gray-100 flex flex-col max-w-4xl mx-auto w-full">
-      <header className="py-8 border-b border-gray-800">
-        <h1 className="text-3xl font-black flex items-center justify-center gap-3 italic">
-          <Activity className="text-blue-500" size={32} />
-          MUSIC DEDUPER
-        </h1>
-        <p className="text-gray-500 mt-2 text-center text-xs font-bold tracking-widest uppercase">High performance de-duplication for audiophiles</p>
-      </header>
+    const startAutoDelete = async () => {
+      await axios.post(`${API_BASE}/auto-delete`, { strategies: selectedStrategies });
+      setAutoProgress({ isRunning: true, percent: 0, message: 'Deleting...' });
+    };
 
-      <div className="flex justify-center mt-6">
-        <div className="bg-gray-900 p-1 rounded-xl border border-gray-800 flex gap-1">
-          <button 
-            onClick={() => setActiveTab('manual')}
-            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'manual' ? 'bg-gray-800 text-blue-400 shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
-          >
-            Step-by-Step
-          </button>
-          <button 
-            onClick={() => setActiveTab('auto')}
-            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${activeTab === 'auto' ? 'bg-gray-800 text-purple-400 shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
-          >
-            <Zap size={14} /> One-Click Auto
-          </button>
-        </div>
-      </div>
+    const toggleStrategy = (s: string) => {
+      setSelectedStrategies(prev => 
+        prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+      );
+    };
 
-      <main className="flex-1 py-8">
-        {activeTab === 'manual' ? (
-          <>
-            <nav className="flex justify-center gap-8 mb-8">
-              {renderStepHeader(1, 'Scan', true)}
-              {renderStepHeader(2, 'Analyze', isStep1Done)}
-              {renderStepHeader(3, 'Clean', isStep2Done)}
-            </nav>
+    const selectPath = (p: string) => {
+      setSelectedPaths([p]);
+    };
 
-            {activeStep === 1 && (
-              <div className="bg-gray-800/30 p-8 rounded-2xl border border-gray-700/50 space-y-6">
-                <div className="space-y-2 text-left">
-                  <label className="text-xs font-black text-gray-500 uppercase tracking-tighter ml-1">Music Library Path</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-4 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all font-mono text-sm"
-                      placeholder="/mnt/music/library"
-                      value={scanPath}
-                      onChange={(e) => setScanPath(e.target.value)}
-                    />
-                    <button
-                      onClick={startScan}
-                      disabled={scanProgress.isRunning || !scanPath}
-                      className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 px-8 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-blue-900/20 active:scale-95 flex items-center gap-2"
-                    >
-                      {scanProgress.isRunning ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-                      Scan
-                    </button>
-                  </div>
-                </div>
-                {scanProgress.isRunning && (
-                  <div className="bg-blue-500/10 border border-blue-500/20 p-6 rounded-xl flex justify-between items-center">
-                    <div>
-                      <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest">Indexing Files</p>
-                      <p className="text-sm font-bold text-gray-400 mt-1">{scanProgress.message}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-4xl font-black text-blue-500 tabular-nums">{scanProgress.scanned}</span>
-                    </div>
-                  </div>
-                )}
-                {isStep1Done && (
-                  <div className="bg-green-500/10 border border-green-500/20 p-6 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-green-500/20 p-2 rounded-full text-green-500"><CheckCircle size={24} /></div>
-                      <p className="text-sm font-bold text-green-400">{scanProgress.scanned} files successfully indexed.</p>
-                    </div>
-                    <button onClick={() => setActiveStep(2)} className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-tighter flex items-center gap-1 transition-all active:scale-95">
-                      Proceed <ChevronRight size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+    const deleteGroup = async (groupId: string, keepId: number) => {
+      await axios.post(`${API_BASE}/delete`, { groupId, keepId });
+      loadGroups();
+    };
 
-            {activeStep === 2 && (
-              <div className="bg-gray-800/30 p-8 rounded-2xl border border-gray-700/50 space-y-8 text-left">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-xs font-black text-gray-500 uppercase tracking-tighter">Similarity threshold</label>
-                    <span className="text-2xl font-black text-purple-500">{Math.round(similarity * 100)}%</span>
-                  </div>
-                  <input
-                    type="range" min="0.5" max="1" step="0.05"
-                    className="w-full h-2 bg-gray-900 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    value={similarity}
-                    onChange={(e) => setSimilarity(parseFloat(e.target.value))}
-                  />
-                  <div className="flex justify-between text-[10px] text-gray-600 font-black uppercase">
-                    <span>Fuzzy</span>
-                    <span>Exact</span>
-                  </div>
-                </div>
+    const deleteFile = async (id: number) => {
+      if (!confirm('确认删除此文件？')) return;
+      await axios.post(`${API_BASE}/delete-file`, { id });
+      loadGroups();
+    };
+
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+      e.dataTransfer.setData('index', index.toString());
+    };
+
+    const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+      const sourceIndex = parseInt(e.dataTransfer.getData('index'));
+      if (sourceIndex === targetIndex) return;
+      const newS = [...selectedStrategies];
+      const [removed] = newS.splice(sourceIndex, 1);
+      newS.splice(targetIndex, 0, removed);
+      setSelectedStrategies(newS);
+    };
+
+    const totalPages = Math.ceil(totalGroups / pageSize);
+
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500">
+        <header className="flex justify-between items-center">
+          <div>
+            <h2 className="text-3xl font-black tracking-tighter uppercase italic">去重工具</h2>
+            <p className="text-gray-500 text-xs font-bold uppercase mt-1">Scan and remove duplicate tracks based on similarity</p>
+          </div>
+          <div className="flex gap-4">
+             <button onClick={startCombinedSearch} disabled={pipelineProgress.isRunning} className="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
+                {pipelineProgress.isRunning ? <Loader2 className="animate-spin" size={14}/> : <Activity size={14}/>} 查找重复歌曲
+             </button>
+             <button onClick={startAutoDelete} disabled={autoProgress.isRunning || duplicateGroups.length === 0} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
+                {autoProgress.isRunning ? <Loader2 className="animate-spin" size={14}/> : <Trash2 size={14}/>} 自动删除
+             </button>
+             <button onClick={loadGroups} className="bg-gray-800 hover:bg-gray-700 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
+                刷新列表
+             </button>
+          </div>
+        </header>
+
+        <div className="bg-gray-900/30 p-6 rounded-2xl border border-gray-800 grid grid-cols-3 gap-8 text-left">
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-gray-500 uppercase">Scan Path (Single Selection)</label>
+            <div className="flex flex-col gap-2">
+              {['source_path', 'target_path'].map(p => (
                 <button
-                  onClick={startAnalyze}
-                  disabled={analyzeProgress.isRunning}
-                  className="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-purple-900/20 active:scale-95 flex items-center justify-center gap-2"
+                  key={p}
+                  onClick={() => selectPath(p)}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all border flex justify-between items-center ${
+                    selectedPaths.includes(p) 
+                    ? 'bg-blue-600/10 border-blue-500/50 text-blue-400' 
+                    : 'bg-black border-gray-800 text-gray-600'
+                  }`}
                 >
-                   {analyzeProgress.isRunning ? <Loader2 className="animate-spin" size={16} /> : <Activity size={16} />}
-                   Analyze Library
+                  <span>{p.replace('_', ' ')}</span>
+                  <div className={`w-3 h-3 rounded-full border-2 border-gray-700 flex items-center justify-center`}>
+                    {selectedPaths.includes(p) && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>}
+                  </div>
                 </button>
-                {analyzeProgress.isRunning && (
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-[10px] font-black uppercase text-purple-400">
-                      <span>{analyzeProgress.message}</span>
-                      <span>{analyzeProgress.percent}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-900 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 transition-all duration-300 shadow-[0_0_10px_rgba(168,85,247,0.5)]" style={{ width: `${analyzeProgress.percent}%` }}></div>
-                    </div>
-                  </div>
-                )}
-                {isStep2Done && (
-                   <div className="bg-green-500/10 border border-green-500/20 p-6 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-green-500/20 p-2 rounded-full text-green-500"><CheckCircle size={24} /></div>
-                      <p className="text-sm font-bold text-green-400">Analysis complete. Ready for cleanup.</p>
-                    </div>
-                    <button onClick={loadGroups} className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-tighter flex items-center gap-1 transition-all active:scale-95">
-                      Review <ChevronRight size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+              ))}
+            </div>
+          </div>
 
-            {activeStep === 3 && (
-              <div className="space-y-6">
-                <div className="bg-gray-800/30 p-6 rounded-2xl border border-gray-700/50 flex flex-col md:flex-row gap-6 items-start justify-between">
-                  <div className="flex-1 w-full md:w-auto">
-                    {renderStrategyManager()}
-                  </div>
-                  <button
-                    onClick={startAutoDelete}
-                    disabled={autoProgress.isRunning || duplicateGroups.length === 0}
-                    className="bg-red-600 hover:bg-red-500 px-10 py-4 rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-red-900/20 transition-all active:scale-95 disabled:bg-gray-800 w-full md:w-auto mt-4 md:mt-0"
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-gray-500 uppercase flex justify-between">
+              <span>Similarity Threshold</span>
+              <span className="text-blue-400">{Math.round(similarity * 100)}%</span>
+            </label>
+            <div className="h-full flex items-center">
+              <input 
+                type="range" min="0.5" max="1.0" step="0.05" 
+                value={similarity} 
+                onChange={(e) => setSimilarity(parseFloat(e.target.value))}
+                className="w-full h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-gray-500 uppercase">Strategies (Drag to Sort Priority)</label>
+            <div className="flex flex-col gap-2">
+              {['quality', 'size_desc', 'size_asc'].map(s => {
+                const isActive = selectedStrategies.includes(s);
+                const orderIndex = selectedStrategies.indexOf(s);
+                return (
+                  <div
+                    key={s}
+                    draggable={isActive}
+                    onDragStart={(e) => handleDragStart(e, orderIndex)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleDrop(e, orderIndex)}
+                    onClick={() => !isActive && toggleStrategy(s)}
+                    className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase transition-all border flex justify-between items-center cursor-pointer ${
+                      isActive 
+                      ? 'bg-purple-600/10 border-purple-500/50 text-purple-400' 
+                      : 'bg-black border-gray-800 text-gray-600'
+                    }`}
                   >
-                    {autoProgress.isRunning ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
-                    Auto Cleanup
-                  </button>
-                </div>
-
-                <div className="grid gap-4 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar text-left">
-                  {duplicateGroups.map((group, idx) => (
-                    <div key={idx} className="bg-gray-900/50 rounded-xl border border-gray-800 overflow-hidden">
-                      <div className="bg-gray-800/50 px-4 py-2 flex justify-between items-center border-b border-gray-800">
-                        <span className="text-[10px] font-black uppercase text-gray-500">Group {idx + 1}</span>
-                        <span className="text-[10px] font-black text-blue-500 uppercase">{group.length} Files</span>
-                      </div>
-                      <div className="divide-y divide-gray-800">
-                        {group.map(file => (
-                          <div key={file.id} className="p-4 flex justify-between items-center hover:bg-gray-800/20 transition-all">
-                             <div className="flex-1 overflow-hidden mr-4">
-                               <p className="text-sm font-bold truncate text-gray-200">{file.filename}</p>
-                               <p className="text-[10px] text-gray-600 truncate mt-0.5 italic">{file.path}</p>
-                               <div className="flex items-center gap-3 mt-2">
-                                  <span className="text-[10px] font-black px-2 py-0.5 bg-gray-800 rounded border border-gray-700 text-gray-400 uppercase tracking-tighter">
-                                    {file.ext.substring(1)}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-gray-600 tabular-nums">{formatSize(file.size)}</span>
-                               </div>
-                             </div>
-                             <button 
-                              onClick={() => deleteGroup(file.groupId, file.id)}
-                              className="bg-gray-800 hover:bg-blue-600 text-[10px] font-black uppercase px-4 py-2 rounded-lg transition-all"
-                             >
-                              Keep
-                             </button>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="flex items-center gap-2">
+                      {isActive && <span className="w-4 h-4 flex items-center justify-center bg-purple-500 text-black rounded text-[8px]">{orderIndex + 1}</span>}
+                      <span>{s.replace('_', ' ')}</span>
                     </div>
-                  ))}
-                </div>
+                    {isActive && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); toggleStrategy(s); }}
+                        className="text-gray-500 hover:text-red-500"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {(pipelineProgress.isRunning || autoProgress.isRunning) && (
+          <div className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 grid grid-cols-2 gap-8 text-left">
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-black uppercase text-blue-400">
+                <span>
+                  {pipelineProgress.stage === 'scan' ? `Scanning: ${scanProgress.scanned} files` : 
+                   pipelineProgress.stage === 'analyze' ? `Analyzing: ${analyzeProgress.percent}%` : 
+                   `Pipeline Stage: ${pipelineProgress.stage}`}
+                </span>
+                <span>{pipelineProgress.isRunning ? 'Running...' : 'Done'}</span>
               </div>
-            )}
-          </>
-        ) : (
-          <div className="max-w-xl mx-auto space-y-8">
-             <div className="bg-gray-800/30 p-10 rounded-3xl border border-gray-700/50 space-y-8 text-left relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none italic font-black text-6xl">AUTO</div>
-                
-                <h2 className="text-2xl font-black italic tracking-tighter text-purple-400 uppercase">One-Click Pipeline</h2>
-                
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Library Path</label>
-                    <input
-                      type="text"
-                      className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-4 w-full focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono text-sm"
-                      placeholder="/mnt/music"
-                      value={scanPath}
-                      onChange={(e) => setScanPath(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                     <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Threshold: {Math.round(similarity * 100)}%</label>
-                     <input
-                      type="range" min="0.5" max="1" step="0.05"
-                      className="w-full h-2 bg-gray-900 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                      value={similarity}
-                      onChange={(e) => setSimilarity(parseFloat(e.target.value))}
-                    />
-                  </div>
-
-                  {renderStrategyManager()}
-                </div>
-
-                <button
-                  onClick={startFullPipeline}
-                  disabled={pipelineProgress.isRunning}
-                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl shadow-purple-900/40 transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {pipelineProgress.isRunning ? (
-                    <div className="flex items-center justify-center gap-3">
-                      <Loader2 className="animate-spin" size={20} />
-                      Processing Pipeline...
-                    </div>
-                  ) : "Initialize Automation"}
-                </button>
-
-                {pipelineProgress.isRunning && (
-                  <div className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 space-y-6">
-                    <div className="flex justify-between items-center">
-                       <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${pipelineProgress.stage === 'scan' ? 'bg-blue-500 text-white animate-pulse' : 'bg-gray-800 text-gray-500'}`}>
-                            <Search size={16} />
-                          </div>
-                          <div className={`p-2 rounded-lg ${pipelineProgress.stage === 'analyze' ? 'bg-purple-500 text-white animate-pulse' : 'bg-gray-800 text-gray-500'}`}>
-                            <Activity size={16} />
-                          </div>
-                          <div className={`p-2 rounded-lg ${pipelineProgress.stage === 'delete' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-500'}`}>
-                            <Trash2 size={16} />
-                          </div>
-                       </div>
-                       <div className="flex items-center gap-2 text-gray-500 text-[10px] font-black uppercase">
-                         <Clock size={12} />
-                         {Math.round(pipelineProgress.elapsed)}s
-                       </div>
-                    </div>
-
-                    <div className="space-y-2">
-                       <p className="text-xs font-black uppercase text-center tracking-widest text-gray-400">
-                         Current Stage: <span className="text-white">{pipelineProgress.stage}ing...</span>
-                       </p>
-                       <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-purple-600 to-blue-600 transition-all duration-1000" 
-                            style={{ 
-                              width: pipelineProgress.stage === 'scan' ? '33%' : pipelineProgress.stage === 'analyze' ? '66%' : '100%' 
-                            }} 
-                          />
-                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {pipelineProgress.stage === 'done' && !pipelineProgress.isRunning && (
-                   <div className="bg-green-500/10 border border-green-500/20 p-6 rounded-2xl text-center space-y-4">
-                      <div className="bg-green-500 p-3 rounded-full inline-flex text-white"><CheckCircle size={32} /></div>
-                      <h3 className="font-black uppercase tracking-widest text-green-400">Automation Complete</h3>
-                      <p className="text-xs text-gray-500 font-bold">The pipeline has finished successfully. Your library has been optimized.</p>
-                      <button onClick={loadGroups} className="text-[10px] font-black text-blue-500 uppercase hover:text-blue-400 underline underline-offset-4">View Cleanup Report</button>
-                   </div>
-                )}
-             </div>
+              <div className="h-1.5 bg-black rounded-full overflow-hidden">
+                <div 
+                  className={`h-full bg-blue-500 transition-all ${pipelineProgress.isRunning ? 'animate-pulse' : ''}`} 
+                  style={{width: pipelineProgress.stage === 'analyze' ? `${analyzeProgress.percent}%` : (pipelineProgress.isRunning ? '100%' : '0%')}}
+                ></div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-black uppercase text-red-400">
+                <span>Auto Deletion</span>
+                <span>{autoProgress.percent}%</span>
+              </div>
+              <div className="h-1.5 bg-black rounded-full overflow-hidden">
+                <div className="h-full bg-red-500 transition-all" style={{width: `${autoProgress.percent}%`}}></div>
+              </div>
+            </div>
           </div>
         )}
+
+        {totalGroups > pageSize && (
+          <div className="flex justify-between items-center bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+            <span className="text-xs text-gray-500 font-bold uppercase">Showing {(page-1)*pageSize + 1} - {Math.min(page*pageSize, totalGroups)} of {totalGroups} groups</span>
+            <div className="flex gap-2">
+              <button 
+                disabled={page === 1} 
+                onClick={() => setPage(p => p - 1)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded-lg text-[10px] font-black uppercase"
+              >
+                Previous
+              </button>
+              <div className="flex items-center px-4 text-xs font-mono text-blue-500">
+                {page} / {totalPages}
+              </div>
+              <button 
+                disabled={page >= totalPages} 
+                onClick={() => setPage(p => p + 1)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded-lg text-[10px] font-black uppercase"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4">
+          {duplicateGroups.map((group, idx) => (
+            <div key={idx} className="bg-gray-900/50 rounded-xl border border-gray-800 overflow-hidden text-left">
+              <div className="bg-gray-800/50 px-4 py-2 flex justify-between items-center border-b border-gray-800">
+                <span className="text-[10px] font-black uppercase text-gray-500">Group {(page-1)*pageSize + idx + 1}</span>
+                <span className="text-[10px] font-black text-blue-500 uppercase">{group.length} Files</span>
+              </div>
+              <div className="divide-y divide-gray-800">
+                {group.map(file => (
+                  <div key={file.id} className="p-4 flex justify-between items-center hover:bg-gray-800/20 transition-all">
+                      <div className="flex-1 overflow-hidden mr-4">
+                        <p className="text-sm font-bold truncate text-gray-200">{file.filename}</p>
+                        <p className="text-[10px] text-gray-600 truncate mt-0.5 italic">{file.path}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => deleteGroup(file.groupId, file.id)} className="bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[10px] font-black uppercase px-4 py-2 rounded-lg transition-all">Keep</button>
+                        <button onClick={() => deleteFile(file.id)} className="bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white text-[10px] font-black uppercase px-4 py-2 rounded-lg transition-all">Delete</button>
+                      </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderOrganizer = () => {
+    const startOrg = async () => {
+      await axios.post(`${API_BASE}/organize`, { path: getConfig('target_path'), mode: organizeMode });
+      setOrgStatus({ isRunning: true, processed: 0, total: 0, status: 'Starting...' });
+    };
+
+    return (
+      <div className="max-w-2xl space-y-8 animate-in slide-in-from-bottom-4 duration-500 text-left">
+        <header>
+          <h2 className="text-3xl font-black tracking-tighter uppercase italic">歌曲整理</h2>
+          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Structure: Artist / Album / SongName. Mode: Move or Copy.</p>
+        </header>
+
+        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-6 text-left">
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setOrganizeMode('move')}
+                className={`flex-1 py-4 rounded-xl font-black text-xs uppercase border transition-all ${organizeMode === 'move' ? 'bg-green-600/20 border-green-500 text-green-400' : 'bg-black border-gray-800 text-gray-500'}`}
+              >
+                移动 (Move)
+              </button>
+              <button 
+                onClick={() => setOrganizeMode('copy')}
+                className={`flex-1 py-4 rounded-xl font-black text-xs uppercase border transition-all ${organizeMode === 'copy' ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-black border-gray-800 text-gray-500'}`}
+              >
+                复制 (Copy)
+              </button>
+            </div>
+
+            <div className="p-4 bg-black/50 rounded-xl border border-gray-800 text-xs text-gray-400 leading-relaxed">
+              <p>源路径: <span className="text-gray-300 font-mono">{getConfig('source_path')}</span></p>
+              <p className="mt-1">目标路径: <span className="text-gray-300 font-mono">{getConfig('target_path')}</span></p>
+            </div>
+          </div>
+
+          <button
+            onClick={startOrg}
+            disabled={orgStatus.isRunning || !getConfig('target_path')}
+            className="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-95"
+          >
+            {orgStatus.isRunning ? <Loader2 className="animate-spin" size={20}/> : <FolderTree size={20}/>}
+            开始整理
+          </button>
+
+          {orgStatus.isRunning && (
+            <div className="space-y-3">
+              <div className="flex justify-between text-[10px] font-black uppercase text-green-400">
+                <span>{orgStatus.status}</span>
+                <span>{orgStatus.total > 0 ? Math.round((orgStatus.processed / orgStatus.total) * 100) : 0}%</span>
+              </div>
+              <div className="h-1.5 bg-black rounded-full overflow-hidden">
+                <div className="h-full bg-green-500 transition-all" style={{width: `${orgStatus.total > 0 ? (orgStatus.processed / orgStatus.total) * 100 : 0}%`}}></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCompleter = () => {
+    const startComplete = async () => {
+      await axios.post(`${API_BASE}/complete`);
+      setCompleteStatus({ isRunning: true, processed: 0, total: 0, status: 'Contacting MusicBrainz...' });
+    };
+
+    return (
+      <div className="max-w-2xl space-y-8 text-left">
+        <header>
+          <h2 className="text-3xl font-black tracking-tighter uppercase italic text-purple-400">元数据补全</h2>
+          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Complete missing Artist, Album and Cover Art via MusicBrainz</p>
+        </header>
+
+        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-8 text-left">
+          <div className="flex items-start gap-4 p-6 bg-purple-500/5 border border-purple-500/20 rounded-2xl">
+            <Sparkles className="text-purple-500 shrink-0" size={24} />
+            <div className="text-xs text-gray-400 space-y-2">
+              <p className="font-bold text-purple-400 uppercase">MusicBrainz API Integration</p>
+              <p>我们将尝试基于文件名和现有标签搜索元数据。为了遵守 MusicBrainz 的使用策略，处理速度限制在 1条/秒。</p>
+            </div>
+          </div>
+
+          <button
+            onClick={startComplete}
+            disabled={completeStatus.isRunning}
+            className="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl shadow-purple-900/20"
+          >
+            {completeStatus.isRunning ? <Loader2 className="animate-spin" size={20}/> : <Sparkles size={20}/>}
+            自动补全
+          </button>
+
+          {completeStatus.isRunning && (
+             <div className="space-y-3">
+              <div className="flex justify-between text-[10px] font-black uppercase text-purple-400">
+                <span>{completeStatus.status}</span>
+                <span>{completeStatus.total > 0 ? Math.round((completeStatus.processed / completeStatus.total) * 100) : 0}%</span>
+              </div>
+              <div className="h-1.5 bg-black rounded-full overflow-hidden">
+                <div className="h-full bg-purple-500 transition-all" style={{width: `${completeStatus.total > 0 ? (completeStatus.processed / completeStatus.total) * 100 : 0}%`}}></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderScheduler = () => {
+    return (
+      <div className="max-w-4xl space-y-8 text-left">
+        <header>
+          <h2 className="text-3xl font-black tracking-tighter uppercase italic">任务调度</h2>
+          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Automate organization and metadata completion</p>
+        </header>
+
+        <div className="grid md:grid-cols-2 gap-6 text-left">
+          {schedules.map(task => (
+            <div key={task.id} className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="font-black uppercase tracking-widest text-sm">{task.name}</h3>
+                <button 
+                  onClick={() => updateSchedule({...task, isActive: !task.isActive})}
+                  className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${task.isActive ? 'bg-green-600/20 text-green-400 border border-green-500' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}
+                >
+                  {task.isActive ? 'Active' : 'Disabled'}
+                </button>
+              </div>
+              
+              <div className="space-y-2">
+                 <label className="text-[10px] font-black text-gray-600 uppercase">Cron Expression</label>
+                 <input 
+                  type="text" 
+                  value={task.cron} 
+                  onChange={(e) => {
+                    const newS = schedules.map(s => s.id === task.id ? {...s, cron: e.target.value} : s);
+                    setSchedules(newS);
+                  }}
+                  onBlur={() => updateSchedule(task)}
+                 />
+              </div>
+
+              <div className="pt-2 border-t border-gray-800 flex justify-between items-center">
+                 <span className="text-[10px] text-gray-500 font-bold uppercase">Last Run</span>
+                 <span className="text-[10px] text-gray-300 font-mono">{task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSettings = () => {
+    return (
+      <div className="max-w-2xl space-y-8 text-left">
+        <header>
+          <h2 className="text-3xl font-black tracking-tighter uppercase italic">全局设置</h2>
+          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Manage global paths and API keys</p>
+        </header>
+
+        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-8 text-left">
+          {configs.map(conf => (
+            <div key={conf.key} className="space-y-2">
+              <label className="text-[10px] font-black text-gray-500 uppercase ml-1">{conf.desc || conf.key}</label>
+              <input 
+                type="text" 
+                value={conf.value} 
+                onChange={(e) => {
+                  const newC = configs.map(c => c.key === conf.key ? {...c, value: e.target.value} : c);
+                  setConfigs(newC);
+                }}
+                onBlur={() => updateConfig(conf.key, conf.value)}
+                placeholder={`Enter ${conf.key}...`}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-gray-100 flex">
+      {renderSidebar()}
+      
+      <main className="flex-1 p-8 overflow-y-auto">
+        {activeMenu === 'deduper' && renderDeduper()}
+        {activeMenu === 'organizer' && renderOrganizer()}
+        {activeMenu === 'completer' && renderCompleter()}
+        {activeMenu === 'scheduler' && renderScheduler()}
+        {activeMenu === 'settings' && renderSettings()}
       </main>
 
-      <footer className="py-12 border-t border-gray-800 text-[10px] text-gray-600 font-black uppercase tracking-tighter text-center">
-        DEDUPER ENGINE V1.0 • HIGH PERFORMANCE MODE ACTIVE
-      </footer>
-
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
-        input[type="range"]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          height: 18px;
-          width: 18px;
-          border-radius: 50%;
-          background: white;
-          cursor: pointer;
-          border: 4px solid #a855f7;
-          box-shadow: 0 0 10px rgba(168,85,247,0.3);
+        input[type="text"], input[type="number"] {
+          background: #0a0a0a;
+          border: 1px solid #333;
+          border-radius: 8px;
+          padding: 10px 14px;
+          font-size: 14px;
+          color: #eee;
+          width: 100%;
+          outline: none;
         }
+        input[type="text"]:focus { border-color: #3b82f6; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
     </div>
   );
