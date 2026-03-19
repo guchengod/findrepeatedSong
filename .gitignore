@@ -27,3 +27,5 @@ dummy_music
 frontend/node_modules
 frontend/dist
 backend/data
+dummy_music_test
+music
