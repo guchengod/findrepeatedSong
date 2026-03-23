@@ -39,7 +39,11 @@ func addTask(task ScheduleTask) {
 				doOrganize(conf.Value, "move") // Default to move in auto
 			}
 		case "complete":
-			doComplete()
+			var conf AppConfig
+			db.Where("key = ?", "source_path").First(&conf)
+			if conf.Value != "" {
+				doComplete(conf.Value)
+			}
 		}
 
 		// Update last run

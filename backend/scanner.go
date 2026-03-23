@@ -3,56 +3,133 @@ package main
 import (
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/dhowden/tag"
+	"github.com/gin-gonic/gin"
+	"go.senan.xyz/taglib"
 	"gorm.io/gorm/clause"
 )
 
+func getDurationViaFFprobe(path string) float64 {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	s := strings.TrimSpace(string(out))
+	d, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
 var (
 	validExts = map[string]bool{
-		".mp3": true, ".flac": true, ".wav": true, ".ape": true,
-		".m4a": true, ".aac": true, ".ogg": true, ".wma": true,
+		// Mainstream Lossy
+		".mp3": true, ".m4a": true, ".aac": true, ".ogg": true, ".opus": true, ".wma": true,
+		// Mainstream Lossless
+		".flac": true, ".wav": true, ".aiff": true, ".aif": true,
+		// Others / Audiophile
+		".ape": true, ".wv": true, ".tak": true,
 	}
 	cleanRe = regexp.MustCompile(`[^\p{L}\p{N}]+`) // Only letters and numbers
-
-	scanProgress struct {
-		sync.RWMutex
-		IsRunning bool
-		Scanned   int
-		TotalMsg  string
-	}
 )
 
-func extractMetadata(path string) (artist, album, title string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "Unknown Artist", "Unknown Album", filepath.Base(path)
-	}
-	defer f.Close()
+func extractFromFilename(filename string) (artist, title string) {
+	ext := filepath.Ext(filename)
+	name := strings.TrimSuffix(filename, ext)
 
-	m, err := tag.ReadFrom(f)
-	if err != nil {
-		return "Unknown Artist", "Unknown Album", filepath.Base(path)
+	// Clean up index patterns like "01. " or "01 - " or "01 "
+	indexRe := regexp.MustCompile(`^(\d+)[.\-\s]+\s*`)
+	if match := indexRe.FindStringSubmatch(name); match != nil {
+		name = name[len(match[0]):]
 	}
 
-	artist = m.Artist()
-	album = m.Album()
-	title = m.Title()
-
-	if artist == "" {
-		artist = "Unknown Artist"
+	// Rule 8: Index.Artist-Title_Time.ext (Index already handled)
+	timeRe := regexp.MustCompile(`_(\d+:\d+|\d+)$`)
+	if match := timeRe.FindStringSubmatch(name); match != nil {
+		name = name[:len(name)-len(match[0])]
 	}
+
+	// Remove brackets for cleaner split
+	bracketRe := regexp.MustCompile(`[\(\[\{].*?[\)\]\}]`)
+	nameClean := bracketRe.ReplaceAllString(name, " ")
+
+	// Check for separators
+	sep := "-"
+	if strings.Contains(nameClean, "——") {
+		sep = "——"
+	} else if !strings.Contains(nameClean, "-") && strings.Contains(nameClean, ".") {
+		sep = "."
+	}
+
+	if strings.Contains(nameClean, sep) {
+		parts := strings.Split(nameClean, sep)
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+
+		if len(parts) >= 3 {
+			// Rule 2/5: Index-Artist-Title-原唱 (Index already handled)
+			artist = parts[0]
+			title = parts[1]
+		} else if len(parts) == 2 {
+			// Rule 1, 9: Artist-Title or Title-Artist
+			artist = parts[0]
+			title = parts[1]
+		}
+	} else {
+		// Rule 4, 6: Index.Title or Title (Index already handled)
+		title = strings.TrimSpace(nameClean)
+	}
+
+	return artist, title
+}
+
+func extractMetadata(path string) (artist, album, title string, duration float64) {
+	filename := filepath.Base(path)
+	
+	tags, _ := taglib.ReadTags(path)
+	props, _ := taglib.ReadProperties(path)
+
+	if tags != nil {
+		if v, ok := tags["ARTIST"]; ok && len(v) > 0 { artist = v[0] }
+		if v, ok := tags["ALBUM"]; ok && len(v) > 0 { album = v[0] }
+		if v, ok := tags["TITLE"]; ok && len(v) > 0 { title = v[0] }
+	}
+	duration = props.Length.Seconds()
+
+	fa, ft := extractFromFilename(filename)
+
+	if artist == "" || artist == "Unknown Artist" {
+		if fa != "" {
+			artist = fa
+		} else {
+			artist = "Unknown Artist"
+		}
+	}
+
+	if title == "" || title == filename {
+		if ft != "" {
+			title = ft
+		} else {
+			title = filename
+		}
+	}
+
 	if album == "" {
 		album = "Unknown Album"
 	}
-	if title == "" {
-		title = filepath.Base(path)
+
+	if duration == 0 {
+		duration = getDurationViaFFprobe(path)
 	}
+
 	return
 }
 
@@ -72,19 +149,14 @@ func normalizeName(name string) string {
 }
 
 func doScan(rootPaths []string) {
-	scanProgress.Lock()
-	scanProgress.IsRunning = true
-	scanProgress.Scanned = 0
-	scanProgress.TotalMsg = "Scanning..."
-	scanProgress.Unlock()
+	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": 0, "status": "Cleaning old records..."})
+	// Mark all existing records as deleted before scan
+	db.Model(&SongFile{}).Where("1=1").Update("deleted", true)
 
-	defer func() {
-		scanProgress.Lock()
-		scanProgress.IsRunning = false
-		scanProgress.TotalMsg = "Done"
-		scanProgress.Unlock()
-	}()
+	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": 0, "status": "Starting scan..."})
+	defer broadcastProgress("scan", gin.H{"isRunning": false, "status": "Scan finished"})
 
+	scanned := 0
 	batchSize := 1000
 	var batch []SongFile
 
@@ -132,7 +204,7 @@ func doScan(rootPaths []string) {
 					continue // Skip if name is completely empty after clean
 				}
 
-				artist, album, title := extractMetadata(fullPath)
+				artist, album, title, duration := extractMetadata(fullPath)
 
 				file := SongFile{
 					Path:           fullPath,
@@ -141,14 +213,16 @@ func doScan(rootPaths []string) {
 					Album:          album,
 					Title:          title,
 					NormalizedName: normalized,
+					Duration:       duration,
 					Size:           info.Size(),
 					Ext:            ext,
 				}
 				batch = append(batch, file)
 
-				scanProgress.Lock()
-				scanProgress.Scanned++
-				scanProgress.Unlock()
+				scanned++
+				if scanned%100 == 0 {
+					broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scanning..."})
+				}
 
 				if len(batch) >= batchSize {
 					saveBatch(batch)
@@ -163,6 +237,7 @@ func doScan(rootPaths []string) {
 	if len(batch) > 0 {
 		saveBatch(batch)
 	}
+	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scan finished, saving... "})
 }
 
 func saveBatch(batch []SongFile) {
@@ -171,6 +246,7 @@ func saveBatch(batch []SongFile) {
 	}
 	db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "path"}},
-		DoUpdates: clause.AssignmentColumns([]string{"filename", "artist", "album", "title", "normalized_name", "size", "ext"}),
+		DoUpdates: clause.AssignmentColumns([]string{"filename", "artist", "album", "title", "normalized_name", "duration", "size", "ext", "deleted"}),
 	}).Create(&batch)
 }
+

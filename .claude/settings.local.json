@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -fsSL https://bun.sh/install)",
+      "Bash(bash)",
+      "Read(//Users/galvin/.claude/skills/gstack/**)",
+      "Bash(~/.bun/bin/bun ./setup)",
+      "Bash(bash ~/.claude/skills/gstack/setup)",
+      "Bash(source ~/.zshrc)",
+      "Bash(source ~/.bashrc)",
+      "Bash(mkdir -p /Users/galvin/Documents/code/go/findrepeatedSong/.claude/skills)",
+      "Bash(ln -snf ~/.claude/skills/gstack /Users/galvin/Documents/code/go/findrepeatedSong/.claude/skills/gstack)"
+    ]
+  }
+}

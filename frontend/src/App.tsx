@@ -1,10 +1,21 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Activity, Trash2, 
   Loader2, FolderTree, 
-  Settings, Calendar, Sparkles
+  Settings, Calendar, Sparkles,
+  ChevronLeft, ChevronRight,
+  Menu, Globe,
+  Check, AlertCircle,
+  FileMusic, Search, HardDrive,
+  Clock, Layers, Info,
+  Sun, Moon
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import './i18n';
+import { cn } from './lib/utils';
+
+// --- Types ---
 
 interface SongFile {
   id: number;
@@ -35,10 +46,90 @@ interface ScheduleTask {
 
 const API_BASE = '/api';
 
+// --- Simple UI Components (shadcn style) ---
+
+const Card = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+  <div className={cn("bg-card text-card-foreground rounded-lg border shadow-sm", className)}>
+    {children}
+  </div>
+);
+
+const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link', size?: 'default' | 'sm' | 'lg' | 'icon' }>(
+  ({ className, variant = 'default', size = 'default', ...props }, ref) => {
+    const variants = {
+      default: "bg-primary text-primary-foreground hover:bg-primary/90",
+      destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+      outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+      secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      ghost: "hover:bg-accent hover:text-accent-foreground",
+      link: "text-primary underline-offset-4 hover:underline",
+    };
+    const sizes = {
+      default: "h-10 px-4 py-2",
+      sm: "h-9 rounded-md px-3",
+      lg: "h-11 rounded-md px-8",
+      icon: "h-10 w-10",
+    };
+    return (
+      <button
+        ref={ref}
+        className={cn(
+          "inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          variants[variant],
+          sizes[size],
+          className
+        )}
+        {...props}
+      />
+    );
+  }
+);
+
+const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, ...props }, ref) => (
+    <input
+      type={type}
+      className={cn(
+        "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      )}
+      ref={ref}
+      {...props}
+    />
+  )
+);
+
+const Progress = ({ value, className }: { value: number, className?: string }) => (
+  <div className={cn("relative h-2 w-full overflow-hidden rounded-full bg-secondary", className)}>
+    <div
+      className="h-full w-full flex-1 bg-primary transition-all"
+      style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+    />
+  </div>
+);
+
+const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, variant?: 'default' | 'secondary' | 'destructive' | 'outline' }) => {
+  const variants = {
+    default: "bg-primary text-primary-foreground hover:bg-primary/80",
+    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/80",
+    outline: "text-foreground border border-input hover:bg-accent",
+  };
+  return (
+    <div className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2", variants[variant])}>
+      {children}
+    </div>
+  );
+};
+
+// --- Main App ---
+
 function App() {
+  const { t, i18n } = useTranslation();
   const [activeMenu, setActiveMenu] = useState<'deduper' | 'organizer' | 'completer' | 'scheduler' | 'settings'>('deduper');
   const [configs, setConfigs] = useState<AppConfig[]>([]);
   const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   
   // Progress States
   const [scanProgress, setScanProgress] = useState({ isRunning: false, scanned: 0, message: '' });
@@ -46,6 +137,7 @@ function App() {
   const [pipelineProgress, setPipelineProgress] = useState({ isRunning: false, stage: '', elapsed: 0 });
   const [orgStatus, setOrgStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
   const [completeStatus, setCompleteStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
+  const [completeLogs, setCompleteLogs] = useState<string[]>([]);
   const [autoProgress, setAutoProgress] = useState({ isRunning: false, percent: 0, message: '' });
 
   const [duplicateGroups, setDuplicateGroups] = useState<SongFile[][]>([]);
@@ -56,15 +148,35 @@ function App() {
   const [similarity, setSimilarity] = useState(0.8);
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>(['source_path']);
-
-  // View specific states (Lifted to top level to follow Hook rules)
   const [organizeMode, setOrganizeMode] = useState<'move' | 'copy'>('move');
 
   useEffect(() => {
     loadConfigs();
     loadSchedules();
     loadGroups();
+    
+    // Theme initialization
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const finalTheme = savedTheme || systemTheme;
+    setTheme(finalTheme);
+    applyTheme(finalTheme);
   }, []);
+
+  const applyTheme = (t: 'light' | 'dark') => {
+    if (t === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  };
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    applyTheme(newTheme);
+  };
 
   useEffect(() => {
     if (configs.length > 0 && selectedStrategies.length === 0) {
@@ -74,47 +186,48 @@ function App() {
   }, [configs]);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        if (pipelineProgress.isRunning) {
-          const res = await axios.get(`${API_BASE}/pipeline/progress`);
-          setPipelineProgress(res.data);
-          if (!res.data.isRunning) {
-             loadGroups();
-          }
-        }
-        
-        const pipeRes = await axios.get(`${API_BASE}/pipeline/progress`);
-        if (pipeRes.data.isRunning) {
-            if (pipeRes.data.stage === 'scan') {
-                const s = await axios.get(`${API_BASE}/scan/progress`);
-                setScanProgress(s.data);
-            } else if (pipeRes.data.stage === 'analyze') {
-                const a = await axios.get(`${API_BASE}/analyze/progress`);
-                setAnalyzeProgress(a.data);
-            }
-        } else {
-            setScanProgress(p => ({...p, isRunning: false}));
-            setAnalyzeProgress(p => ({...p, isRunning: false}));
-        }
+    let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname === 'localhost' ? 'localhost:8080' : window.location.host;
+    const wsUrl = `${wsProtocol}//${host}/ws`;
+    const ws = new WebSocket(wsUrl);
 
-        if (orgStatus.isRunning) {
-          const res = await axios.get(`${API_BASE}/organize/status`);
-          setOrgStatus(res.data);
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        const { topic, data } = msg;
+
+        switch (topic) {
+          case 'pipeline':
+            setPipelineProgress(data);
+            if (!data.isRunning) loadGroups();
+            break;
+          case 'scan':
+            setScanProgress(data);
+            break;
+          case 'analyze':
+            setAnalyzeProgress(data);
+            break;
+          case 'organize':
+            setOrgStatus(data);
+            break;
+          case 'complete':
+            setCompleteStatus(data);
+            if (data.detail) {
+              setCompleteLogs(prev => [data.detail, ...prev].slice(0, 100));
+            }
+            break;
+          case 'auto_delete':
+            setAutoProgress(data);
+            if (!data.isRunning) loadGroups();
+            break;
         }
-        if (completeStatus.isRunning) {
-          const res = await axios.get(`${API_BASE}/complete/status`);
-          setCompleteStatus(res.data);
-        }
-        if (autoProgress.isRunning) {
-          const res = await axios.get(`${API_BASE}/auto-delete/progress`);
-          setAutoProgress(res.data);
-          if (!res.data.isRunning) loadGroups();
-        }
-      } catch (e) { console.error(e); }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [pipelineProgress, orgStatus, completeStatus, autoProgress]);
+      } catch (e) {
+        console.error("Failed to parse websocket message", e);
+      }
+    };
+
+    return () => ws.close();
+  }, []);
 
   const loadConfigs = async () => {
     const res = await axios.get(`${API_BASE}/config`);
@@ -148,55 +261,21 @@ function App() {
 
   const getConfig = (key: string) => configs.find(c => c.key === key)?.value || '';
 
-  const renderSidebar = () => (
-    <div className="w-64 bg-gray-950 border-r border-gray-800 flex flex-col p-4 gap-2">
-      <div className="flex items-center gap-3 px-4 py-6 mb-4">
-        <Activity className="text-blue-500" />
-        <span className="font-black text-lg tracking-tighter">MUSIC ENGINE</span>
-      </div>
-      
-      {[
-        { id: 'deduper', label: '去重 (Deduper)', icon: Trash2 },
-        { id: 'organizer', label: '整理 (Organizer)', icon: FolderTree },
-        { id: 'completer', label: '补全 (Completer)', icon: Sparkles },
-        { id: 'scheduler', label: '定时 (Scheduler)', icon: Calendar },
-        { id: 'settings', label: '设置 (Settings)', icon: Settings },
-      ].map(item => (
-        <button
-          key={item.id}
-          onClick={() => setActiveMenu(item.id as any)}
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all ${
-            activeMenu === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
-          }`}
-        >
-          <item.icon size={18} />
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
+  const toggleLanguage = () => {
+    i18n.changeLanguage(i18n.language === 'en' ? 'zh' : 'en');
+  };
+
+  // --- Sub-Views ---
 
   const renderDeduper = () => {
     const startCombinedSearch = async () => {
       const paths = selectedPaths.map(p => getConfig(p)).filter(p => p !== '');
-      if (paths.length === 0) return alert('请选择一个有效路径');
+      if (paths.length === 0) return alert('Please select a path');
       await axios.post(`${API_BASE}/full-pipeline`, { paths, similarity });
-      setPipelineProgress({ isRunning: true, stage: 'scan', elapsed: 0 });
     };
 
     const startAutoDelete = async () => {
       await axios.post(`${API_BASE}/auto-delete`, { strategies: selectedStrategies });
-      setAutoProgress({ isRunning: true, percent: 0, message: 'Deleting...' });
-    };
-
-    const toggleStrategy = (s: string) => {
-      setSelectedStrategies(prev => 
-        prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
-      );
-    };
-
-    const selectPath = (p: string) => {
-      setSelectedPaths([p]);
     };
 
     const deleteGroup = async (groupId: string, keepId: number) => {
@@ -205,202 +284,163 @@ function App() {
     };
 
     const deleteFile = async (id: number) => {
-      if (!confirm('确认删除此文件？')) return;
+      if (!confirm('Confirm delete?')) return;
       await axios.post(`${API_BASE}/delete-file`, { id });
       loadGroups();
-    };
-
-    const handleDragStart = (e: React.DragEvent, index: number) => {
-      e.dataTransfer.setData('index', index.toString());
-    };
-
-    const handleDrop = (e: React.DragEvent, targetIndex: number) => {
-      const sourceIndex = parseInt(e.dataTransfer.getData('index'));
-      if (sourceIndex === targetIndex) return;
-      const newS = [...selectedStrategies];
-      const [removed] = newS.splice(sourceIndex, 1);
-      newS.splice(targetIndex, 0, removed);
-      setSelectedStrategies(newS);
     };
 
     const totalPages = Math.ceil(totalGroups / pageSize);
 
     return (
-      <div className="space-y-8 animate-in fade-in duration-500">
-        <header className="flex justify-between items-center">
+      <div className="space-y-6">
+        <div className="flex justify-between items-end">
           <div>
-            <h2 className="text-3xl font-black tracking-tighter uppercase italic">去重工具</h2>
-            <p className="text-gray-500 text-xs font-bold uppercase mt-1">Scan and remove duplicate tracks based on similarity</p>
+            <h1 className="text-3xl font-bold tracking-tight">{t('deduper.title')}</h1>
+            <p className="text-muted-foreground">{t('deduper.subtitle')}</p>
           </div>
-          <div className="flex gap-4">
-             <button onClick={startCombinedSearch} disabled={pipelineProgress.isRunning} className="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
-                {pipelineProgress.isRunning ? <Loader2 className="animate-spin" size={14}/> : <Activity size={14}/>} 查找重复歌曲
-             </button>
-             <button onClick={startAutoDelete} disabled={autoProgress.isRunning || duplicateGroups.length === 0} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
-                {autoProgress.isRunning ? <Loader2 className="animate-spin" size={14}/> : <Trash2 size={14}/>} 自动删除
-             </button>
-             <button onClick={loadGroups} className="bg-gray-800 hover:bg-gray-700 px-6 py-2 rounded-lg font-bold text-xs uppercase flex items-center gap-2">
-                刷新列表
-             </button>
+          <div className="flex gap-2">
+             <Button onClick={startCombinedSearch} disabled={pipelineProgress.isRunning}>
+                {pipelineProgress.isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4"/>}
+                {t('deduper.findDuplicates')}
+             </Button>
+             <Button variant="destructive" onClick={startAutoDelete} disabled={autoProgress.isRunning || duplicateGroups.length === 0}>
+                {autoProgress.isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Trash2 className="mr-2 h-4 w-4"/>}
+                {t('deduper.autoDelete')}
+             </Button>
+             <Button variant="outline" size="icon" onClick={loadGroups}>
+                <Activity className="h-4 w-4" />
+             </Button>
           </div>
-        </header>
+        </div>
 
-        <div className="bg-gray-900/30 p-6 rounded-2xl border border-gray-800 grid grid-cols-3 gap-8 text-left">
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-gray-500 uppercase">Scan Path (Single Selection)</label>
-            <div className="flex flex-col gap-2">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center gap-2 font-semibold text-sm">
+              <HardDrive size={16} /> {t('deduper.scanPath')}
+            </div>
+            <div className="grid gap-2">
               {['source_path', 'target_path'].map(p => (
-                <button
-                  key={p}
-                  onClick={() => selectPath(p)}
-                  className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all border flex justify-between items-center ${
-                    selectedPaths.includes(p) 
-                    ? 'bg-blue-600/10 border-blue-500/50 text-blue-400' 
-                    : 'bg-black border-gray-800 text-gray-600'
-                  }`}
-                >
-                  <span>{p.replace('_', ' ')}</span>
-                  <div className={`w-3 h-3 rounded-full border-2 border-gray-700 flex items-center justify-center`}>
-                    {selectedPaths.includes(p) && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>}
-                  </div>
-                </button>
+                <div key={p} className="flex items-center gap-2">
+                   <input 
+                    type="radio" id={p} name="path" checked={selectedPaths.includes(p)} 
+                    onChange={() => setSelectedPaths([p])}
+                    className="w-4 h-4 text-primary"
+                  />
+                   <label htmlFor={p} className="text-sm cursor-pointer">{p.replace('_', ' ').toUpperCase()}</label>
+                </div>
               ))}
             </div>
-          </div>
+          </Card>
 
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-gray-500 uppercase flex justify-between">
-              <span>Similarity Threshold</span>
-              <span className="text-blue-400">{Math.round(similarity * 100)}%</span>
-            </label>
-            <div className="h-full flex items-center">
-              <input 
-                type="range" min="0.5" max="1.0" step="0.05" 
-                value={similarity} 
-                onChange={(e) => setSimilarity(parseFloat(e.target.value))}
-                className="w-full h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-              />
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center justify-between font-semibold text-sm">
+              <div className="flex items-center gap-2"><Layers size={16} /> {t('deduper.similarity')}</div>
+              <span className="text-primary font-mono">{Math.round(similarity * 100)}%</span>
             </div>
-          </div>
+            <input 
+              type="range" min="0.5" max="1.0" step="0.05" 
+              value={similarity} 
+              onChange={(e) => setSimilarity(parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+          </Card>
 
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-gray-500 uppercase">Strategies (Drag to Sort Priority)</label>
-            <div className="flex flex-col gap-2">
-              {['quality', 'size_desc', 'size_asc'].map(s => {
-                const isActive = selectedStrategies.includes(s);
-                const orderIndex = selectedStrategies.indexOf(s);
-                return (
-                  <div
-                    key={s}
-                    draggable={isActive}
-                    onDragStart={(e) => handleDragStart(e, orderIndex)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => handleDrop(e, orderIndex)}
-                    onClick={() => !isActive && toggleStrategy(s)}
-                    className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase transition-all border flex justify-between items-center cursor-pointer ${
-                      isActive 
-                      ? 'bg-purple-600/10 border-purple-500/50 text-purple-400' 
-                      : 'bg-black border-gray-800 text-gray-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isActive && <span className="w-4 h-4 flex items-center justify-center bg-purple-500 text-black rounded text-[8px]">{orderIndex + 1}</span>}
-                      <span>{s.replace('_', ' ')}</span>
-                    </div>
-                    {isActive && (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); toggleStrategy(s); }}
-                        className="text-gray-500 hover:text-red-500"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center gap-2 font-semibold text-sm">
+              <Check size={16} /> {t('deduper.strategies')}
             </div>
-          </div>
+            <div className="flex flex-wrap gap-2">
+              {['quality', 'size_desc', 'size_asc'].map(s => (
+                <Badge key={s} variant={selectedStrategies.includes(s) ? 'default' : 'outline'}>
+                  <button onClick={() => {
+                    setSelectedStrategies(prev => 
+                      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+                    );
+                  }}>
+                    {s.replace('_', ' ').toUpperCase()}
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          </Card>
         </div>
 
         {(pipelineProgress.isRunning || autoProgress.isRunning) && (
-          <div className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 grid grid-cols-2 gap-8 text-left">
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-black uppercase text-blue-400">
-                <span>
-                  {pipelineProgress.stage === 'scan' ? `Scanning: ${scanProgress.scanned} files` : 
-                   pipelineProgress.stage === 'analyze' ? `Analyzing: ${analyzeProgress.percent}%` : 
-                   `Pipeline Stage: ${pipelineProgress.stage}`}
-                </span>
-                <span>{pipelineProgress.isRunning ? 'Running...' : 'Done'}</span>
+          <Card className="p-6">
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-medium">
+                  <span className="flex items-center gap-2">
+                    {pipelineProgress.stage === 'scan' ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    {t('common.running')}: {pipelineProgress.stage} {scanProgress.scanned > 0 && `(${scanProgress.scanned})`}
+                  </span>
+                  <span>{pipelineProgress.stage === 'analyze' ? `${analyzeProgress.percent}%` : ''}</span>
+                </div>
+                <Progress value={pipelineProgress.stage === 'analyze' ? analyzeProgress.percent : 100} />
               </div>
-              <div className="h-1.5 bg-black rounded-full overflow-hidden">
-                <div 
-                  className={`h-full bg-blue-500 transition-all ${pipelineProgress.isRunning ? 'animate-pulse' : ''}`} 
-                  style={{width: pipelineProgress.stage === 'analyze' ? `${analyzeProgress.percent}%` : (pipelineProgress.isRunning ? '100%' : '0%')}}
-                ></div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-black uppercase text-red-400">
-                <span>Auto Deletion</span>
-                <span>{autoProgress.percent}%</span>
-              </div>
-              <div className="h-1.5 bg-black rounded-full overflow-hidden">
-                <div className="h-full bg-red-500 transition-all" style={{width: `${autoProgress.percent}%`}}></div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-medium">
+                  <span className="text-destructive font-bold">{t('deduper.autoDelete')}</span>
+                  <span>{autoProgress.percent}%</span>
+                </div>
+                <Progress value={autoProgress.percent} className="bg-destructive/20 [&>div]:bg-destructive" />
               </div>
             </div>
-          </div>
+          </Card>
         )}
 
-        {totalGroups > pageSize && (
-          <div className="flex justify-between items-center bg-gray-900/50 p-4 rounded-xl border border-gray-800">
-            <span className="text-xs text-gray-500 font-bold uppercase">Showing {(page-1)*pageSize + 1} - {Math.min(page*pageSize, totalGroups)} of {totalGroups} groups</span>
-            <div className="flex gap-2">
-              <button 
-                disabled={page === 1} 
-                onClick={() => setPage(p => p - 1)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded-lg text-[10px] font-black uppercase"
-              >
-                Previous
-              </button>
-              <div className="flex items-center px-4 text-xs font-mono text-blue-500">
-                {page} / {totalPages}
+        {totalGroups > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Showing {(page-1)*pageSize + 1}-{Math.min(page*pageSize, totalGroups)} of {totalGroups} {t('deduper.group')}s
               </div>
-              <button 
-                disabled={page >= totalPages} 
-                onClick={() => setPage(p => p + 1)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded-lg text-[10px] font-black uppercase"
-              >
-                Next
-              </button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-medium w-12 text-center">{page} / {totalPages}</span>
+                <Button variant="outline" size="icon" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
 
-        <div className="grid gap-4">
-          {duplicateGroups.map((group, idx) => (
-            <div key={idx} className="bg-gray-900/50 rounded-xl border border-gray-800 overflow-hidden text-left">
-              <div className="bg-gray-800/50 px-4 py-2 flex justify-between items-center border-b border-gray-800">
-                <span className="text-[10px] font-black uppercase text-gray-500">Group {(page-1)*pageSize + idx + 1}</span>
-                <span className="text-[10px] font-black text-blue-500 uppercase">{group.length} Files</span>
-              </div>
-              <div className="divide-y divide-gray-800">
-                {group.map(file => (
-                  <div key={file.id} className="p-4 flex justify-between items-center hover:bg-gray-800/20 transition-all">
-                      <div className="flex-1 overflow-hidden mr-4">
-                        <p className="text-sm font-bold truncate text-gray-200">{file.filename}</p>
-                        <p className="text-[10px] text-gray-600 truncate mt-0.5 italic">{file.path}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => deleteGroup(file.groupId, file.id)} className="bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[10px] font-black uppercase px-4 py-2 rounded-lg transition-all">Keep</button>
-                        <button onClick={() => deleteFile(file.id)} className="bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white text-[10px] font-black uppercase px-4 py-2 rounded-lg transition-all">Delete</button>
-                      </div>
+            <div className="grid gap-4">
+              {duplicateGroups.map((group, idx) => (
+                <Card key={idx} className="overflow-hidden">
+                  <div className="bg-muted/50 px-4 py-2 border-b flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase text-muted-foreground">{t('deduper.group')} {(page-1)*pageSize + idx + 1}</span>
+                    <Badge variant="secondary">{group.length} {t('deduper.files')}</Badge>
                   </div>
-                ))}
-              </div>
+                  <div className="divide-y">
+                    {group.map(file => (
+                      <div key={file.id} className="p-4 flex items-center justify-between hover:bg-accent/50 transition-colors">
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className="bg-primary/10 p-2 rounded-full text-primary shrink-0">
+                            <FileMusic size={16} />
+                          </div>
+                          <div className="overflow-hidden">
+                            <h4 className="text-sm font-semibold truncate">{file.filename}</h4>
+                            <p className="text-xs text-muted-foreground truncate font-mono">{file.path}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0 ml-4">
+                          <Button size="sm" variant="outline" onClick={() => deleteGroup(file.groupId, file.id)}>
+                            {t('deduper.keep')}
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => deleteFile(file.id)}>
+                            {t('deduper.delete')}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -408,106 +448,170 @@ function App() {
   const renderOrganizer = () => {
     const startOrg = async () => {
       await axios.post(`${API_BASE}/organize`, { path: getConfig('target_path'), mode: organizeMode });
-      setOrgStatus({ isRunning: true, processed: 0, total: 0, status: 'Starting...' });
     };
 
     return (
-      <div className="max-w-2xl space-y-8 animate-in slide-in-from-bottom-4 duration-500 text-left">
-        <header>
-          <h2 className="text-3xl font-black tracking-tighter uppercase italic">歌曲整理</h2>
-          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Structure: Artist / Album / SongName. Mode: Move or Copy.</p>
-        </header>
+      <div className="max-w-3xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">{t('organizer.title')}</h1>
+          <p className="text-muted-foreground">{t('organizer.subtitle')}</p>
+        </div>
 
-        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-6 text-left">
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setOrganizeMode('move')}
-                className={`flex-1 py-4 rounded-xl font-black text-xs uppercase border transition-all ${organizeMode === 'move' ? 'bg-green-600/20 border-green-500 text-green-400' : 'bg-black border-gray-800 text-gray-500'}`}
-              >
-                移动 (Move)
-              </button>
-              <button 
-                onClick={() => setOrganizeMode('copy')}
-                className={`flex-1 py-4 rounded-xl font-black text-xs uppercase border transition-all ${organizeMode === 'copy' ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-black border-gray-800 text-gray-500'}`}
-              >
-                复制 (Copy)
-              </button>
+        <Card className="p-8 space-y-8">
+          <div className="grid gap-6">
+            <div className="space-y-4">
+              <label className="text-sm font-semibold">{t('organizer.mode')}</label>
+              <div className="flex p-1 bg-secondary rounded-lg max-w-sm">
+                <button 
+                  onClick={() => setOrganizeMode('move')}
+                  className={cn("flex-1 py-2 rounded-md text-sm font-bold transition-all", organizeMode === 'move' ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                >
+                  {t('organizer.move')}
+                </button>
+                <button 
+                  onClick={() => setOrganizeMode('copy')}
+                  className={cn("flex-1 py-2 rounded-md text-sm font-bold transition-all", organizeMode === 'copy' ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                >
+                  {t('organizer.copy')}
+                </button>
+              </div>
             </div>
 
-            <div className="p-4 bg-black/50 rounded-xl border border-gray-800 text-xs text-gray-400 leading-relaxed">
-              <p>源路径: <span className="text-gray-300 font-mono">{getConfig('source_path')}</span></p>
-              <p className="mt-1">目标路径: <span className="text-gray-300 font-mono">{getConfig('target_path')}</span></p>
+            <div className="grid gap-4 md:grid-cols-2">
+               <div className="space-y-2 p-4 bg-muted/30 rounded-lg border border-dashed">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase">{t('organizer.source')}</div>
+                  <div className="text-sm font-mono truncate">{getConfig('source_path')}</div>
+               </div>
+               <div className="space-y-2 p-4 bg-primary/5 rounded-lg border border-primary/20">
+                  <div className="text-[10px] font-bold text-primary uppercase">{t('organizer.target')}</div>
+                  <div className="text-sm font-mono truncate">{getConfig('target_path')}</div>
+               </div>
             </div>
+
+            <Button size="lg" className="w-full font-bold uppercase tracking-widest" disabled={orgStatus.isRunning || !getConfig('target_path')} onClick={startOrg}>
+               {orgStatus.isRunning ? <Loader2 className="mr-2 animate-spin"/> : <FolderTree className="mr-2"/>}
+               {t('organizer.start')}
+            </Button>
           </div>
 
-          <button
-            onClick={startOrg}
-            disabled={orgStatus.isRunning || !getConfig('target_path')}
-            className="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-95"
-          >
-            {orgStatus.isRunning ? <Loader2 className="animate-spin" size={20}/> : <FolderTree size={20}/>}
-            开始整理
-          </button>
-
           {orgStatus.isRunning && (
-            <div className="space-y-3">
-              <div className="flex justify-between text-[10px] font-black uppercase text-green-400">
+            <div className="space-y-2 pt-4 border-t">
+              <div className="flex justify-between text-xs font-medium">
                 <span>{orgStatus.status}</span>
                 <span>{orgStatus.total > 0 ? Math.round((orgStatus.processed / orgStatus.total) * 100) : 0}%</span>
               </div>
-              <div className="h-1.5 bg-black rounded-full overflow-hidden">
-                <div className="h-full bg-green-500 transition-all" style={{width: `${orgStatus.total > 0 ? (orgStatus.processed / orgStatus.total) * 100 : 0}%`}}></div>
-              </div>
+              <Progress value={orgStatus.total > 0 ? (orgStatus.processed / orgStatus.total) * 100 : 0} />
             </div>
           )}
-        </div>
+        </Card>
       </div>
     );
   };
 
   const renderCompleter = () => {
     const startComplete = async () => {
-      await axios.post(`${API_BASE}/complete`);
-      setCompleteStatus({ isRunning: true, processed: 0, total: 0, status: 'Contacting MusicBrainz...' });
+      const path = getConfig(selectedPaths[0]);
+      if (!path) return;
+      setCompleteLogs([]);
+      await axios.post(`${API_BASE}/complete`, { path });
     };
 
     return (
-      <div className="max-w-2xl space-y-8 text-left">
-        <header>
-          <h2 className="text-3xl font-black tracking-tighter uppercase italic text-purple-400">元数据补全</h2>
-          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Complete missing Artist, Album and Cover Art via MusicBrainz</p>
-        </header>
+      <div className="max-w-4xl space-y-6">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">{t('completer.title')}</h1>
+            <p className="text-muted-foreground">{t('completer.subtitle')}</p>
+          </div>
+          <Button variant="outline" size="icon" onClick={() => setCompleteLogs([])}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
 
-        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-8 text-left">
-          <div className="flex items-start gap-4 p-6 bg-purple-500/5 border border-purple-500/20 rounded-2xl">
-            <Sparkles className="text-purple-500 shrink-0" size={24} />
-            <div className="text-xs text-gray-400 space-y-2">
-              <p className="font-bold text-purple-400 uppercase">MusicBrainz API Integration</p>
-              <p>我们将尝试基于文件名和现有标签搜索元数据。为了遵守 MusicBrainz 的使用策略，处理速度限制在 1条/秒。</p>
-            </div>
+        <div className="grid gap-6 md:grid-cols-[1fr_300px]">
+          <div className="space-y-6">
+            <Card className="p-6 space-y-6">
+              <div className="space-y-4">
+                <label className="text-sm font-semibold">{t('deduper.scanPath')}</label>
+                <div className="flex gap-4">
+                  {['source_path', 'target_path'].map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setSelectedPaths([p])}
+                      className={cn(
+                        "flex-1 p-3 rounded-xl border-2 text-sm font-bold transition-all text-left flex justify-between items-center",
+                        selectedPaths.includes(p) ? "border-primary bg-primary/5 text-primary" : "border-muted bg-muted/20 text-muted-foreground hover:border-muted-foreground/50"
+                      )}
+                    >
+                      {p.replace('_', ' ').toUpperCase()}
+                      {selectedPaths.includes(p) && <Check size={16} />}
+                    </button>
+                  ))}
+                </div>
+                <div className="p-3 bg-secondary/50 rounded-lg text-xs font-mono truncate border italic">
+                   {getConfig(selectedPaths[0])}
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-4 bg-muted/50 rounded-lg text-sm border-l-4 border-primary">
+                 <Sparkles className="text-primary shrink-0" size={20} />
+                 <p className="text-muted-foreground leading-relaxed">
+                    Uses <strong>MusicBrainz API</strong> to match recordings. We search by structured file tags and verified duration. Rate limited to 1 request/second.
+                 </p>
+              </div>
+
+              <Button size="lg" className="w-full h-14 font-bold uppercase tracking-widest shadow-lg shadow-primary/20" disabled={completeStatus.isRunning} onClick={startComplete}>
+                {completeStatus.isRunning ? <Loader2 className="mr-2 animate-spin"/> : <Sparkles className="mr-2"/>}
+                {t('completer.start')}
+              </Button>
+            </Card>
+
+            {completeLogs.length > 0 && (
+              <Card className="overflow-hidden">
+                 <div className="px-4 py-2 border-b bg-muted/50 font-bold text-xs uppercase flex items-center gap-2">
+                    <Activity size={14} /> {t('completer.logs')}
+                 </div>
+                 <div className="h-[400px] overflow-y-auto p-4 bg-black font-mono text-[11px] space-y-1">
+                    {completeLogs.map((log, i) => (
+                      <div key={i} className={cn(
+                        "leading-loose border-b border-white/5 pb-1",
+                        log.includes('✅') ? "text-green-400" : log.includes('❌') ? "text-red-400" : "text-yellow-400"
+                      )}>
+                        {log}
+                      </div>
+                    ))}
+                 </div>
+              </Card>
+            )}
           </div>
 
-          <button
-            onClick={startComplete}
-            disabled={completeStatus.isRunning}
-            className="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl shadow-purple-900/20"
-          >
-            {completeStatus.isRunning ? <Loader2 className="animate-spin" size={20}/> : <Sparkles size={20}/>}
-            自动补全
-          </button>
+          <div className="space-y-6">
+             <Card className="p-4 space-y-4">
+                <h3 className="text-sm font-bold uppercase">{t('common.running')}</h3>
+                {completeStatus.isRunning ? (
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-end">
+                        <span className="text-[10px] font-bold text-primary uppercase">Status</span>
+                        <span className="text-xs font-mono">{completeStatus.processed} Files</span>
+                     </div>
+                     <Progress value={100} className="animate-pulse" />
+                     <p className="text-[10px] text-muted-foreground">{completeStatus.status}</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground space-y-2 border border-dashed rounded-lg">
+                     <Clock size={24} />
+                     <span className="text-xs font-bold uppercase tracking-tighter italic">Waiting...</span>
+                  </div>
+                )}
+             </Card>
 
-          {completeStatus.isRunning && (
-             <div className="space-y-3">
-              <div className="flex justify-between text-[10px] font-black uppercase text-purple-400">
-                <span>{completeStatus.status}</span>
-                <span>{completeStatus.total > 0 ? Math.round((completeStatus.processed / completeStatus.total) * 100) : 0}%</span>
-              </div>
-              <div className="h-1.5 bg-black rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 transition-all" style={{width: `${completeStatus.total > 0 ? (completeStatus.processed / completeStatus.total) * 100 : 0}%`}}></div>
-              </div>
-            </div>
-          )}
+             <Card className="p-4 space-y-2">
+                <h3 className="text-xs font-bold uppercase flex items-center gap-2"><Info size={14} /> Note</h3>
+                <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                  Lossy formats will be tagged with ID3v2. Lossless formats (FLAC/WAV) will be updated via VorbisComment or RIFF chunks.
+                </p>
+             </Card>
+          </div>
         </div>
       </div>
     );
@@ -515,43 +619,56 @@ function App() {
 
   const renderScheduler = () => {
     return (
-      <div className="max-w-4xl space-y-8 text-left">
-        <header>
-          <h2 className="text-3xl font-black tracking-tighter uppercase italic">任务调度</h2>
-          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Automate organization and metadata completion</p>
-        </header>
+      <div className="max-w-5xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">{t('scheduler.title')}</h1>
+          <p className="text-muted-foreground">{t('scheduler.subtitle')}</p>
+        </div>
 
-        <div className="grid md:grid-cols-2 gap-6 text-left">
+        <div className="grid md:grid-cols-2 gap-6">
           {schedules.map(task => (
-            <div key={task.id} className="bg-gray-900/50 p-6 rounded-2xl border border-gray-800 space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="font-black uppercase tracking-widest text-sm">{task.name}</h3>
-                <button 
-                  onClick={() => updateSchedule({...task, isActive: !task.isActive})}
-                  className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${task.isActive ? 'bg-green-600/20 text-green-400 border border-green-500' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}
-                >
-                  {task.isActive ? 'Active' : 'Disabled'}
-                </button>
-              </div>
-              
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black text-gray-600 uppercase">Cron Expression</label>
-                 <input 
-                  type="text" 
-                  value={task.cron} 
-                  onChange={(e) => {
-                    const newS = schedules.map(s => s.id === task.id ? {...s, cron: e.target.value} : s);
-                    setSchedules(newS);
-                  }}
-                  onBlur={() => updateSchedule(task)}
-                 />
+            <Card key={task.id} className="p-6">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-lg font-bold uppercase tracking-tight">{task.name}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">Automatic Background Execution</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <div className={cn(
+                    "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                    task.isActive ? "bg-green-500/10 text-green-500" : "bg-muted text-muted-foreground"
+                  )}>
+                    {task.isActive ? t('scheduler.active') : t('scheduler.disabled')}
+                  </div>
+                  <button 
+                    onClick={() => updateSchedule({...task, isActive: !task.isActive})}
+                    className="text-[10px] font-bold text-primary hover:underline underline-offset-4"
+                  >
+                    Toggle
+                  </button>
+                </div>
               </div>
 
-              <div className="pt-2 border-t border-gray-800 flex justify-between items-center">
-                 <span className="text-[10px] text-gray-500 font-bold uppercase">Last Run</span>
-                 <span className="text-[10px] text-gray-300 font-mono">{task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never'}</span>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">{t('scheduler.cron')}</label>
+                  <Input 
+                    value={task.cron}
+                    onChange={(e) => {
+                      const newS = schedules.map(s => s.id === task.id ? {...s, cron: e.target.value} : s);
+                      setSchedules(newS);
+                    }}
+                    onBlur={() => updateSchedule(task)}
+                    className="font-mono h-8 text-xs"
+                  />
+                </div>
+
+                <div className="flex justify-between items-center text-xs border-t pt-4">
+                  <span className="text-muted-foreground uppercase font-bold text-[10px]">{t('scheduler.lastRun')}</span>
+                  <span className="font-mono">{task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never'}</span>
+                </div>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       </div>
@@ -560,58 +677,155 @@ function App() {
 
   const renderSettings = () => {
     return (
-      <div className="max-w-2xl space-y-8 text-left">
-        <header>
-          <h2 className="text-3xl font-black tracking-tighter uppercase italic">全局设置</h2>
-          <p className="text-gray-500 text-xs font-bold uppercase mt-1">Manage global paths and API keys</p>
-        </header>
-
-        <div className="bg-gray-900/50 p-8 rounded-3xl border border-gray-800 space-y-8 text-left">
-          {configs.map(conf => (
-            <div key={conf.key} className="space-y-2">
-              <label className="text-[10px] font-black text-gray-500 uppercase ml-1">{conf.desc || conf.key}</label>
-              <input 
-                type="text" 
-                value={conf.value} 
-                onChange={(e) => {
-                  const newC = configs.map(c => c.key === conf.key ? {...c, value: e.target.value} : c);
-                  setConfigs(newC);
-                }}
-                onBlur={() => updateConfig(conf.key, conf.value)}
-                placeholder={`Enter ${conf.key}...`}
-              />
-            </div>
-          ))}
+      <div className="max-w-2xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
+          <p className="text-muted-foreground">{t('settings.subtitle')}</p>
         </div>
+
+        <Card className="p-8 space-y-8">
+          <div className="grid gap-6">
+            {configs.map(conf => (
+              <div key={conf.key} className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{conf.desc || conf.key}</label>
+                <div className="flex gap-2">
+                   <Input 
+                    value={conf.value} 
+                    onChange={(e) => {
+                      const newC = configs.map(c => c.key === conf.key ? {...c, value: e.target.value} : c);
+                      setConfigs(newC);
+                    }}
+                    placeholder={`Enter ${conf.key}...`}
+                    className="font-mono text-xs"
+                  />
+                  <Button variant="outline" size="sm" onClick={() => updateConfig(conf.key, conf.value)}>
+                    {t('settings.save')}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     );
   };
 
+  // --- Layout Components ---
+
+  const SidebarItem = ({ id, label, icon: Icon }: { id: typeof activeMenu, label: string, icon: any }) => (
+    <button
+      onClick={() => setActiveMenu(id)}
+      className={cn(
+        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all group",
+        activeMenu === id 
+        ? "bg-primary text-primary-foreground shadow-sm" 
+        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      )}
+    >
+      <Icon size={18} className={cn("transition-colors", activeMenu === id ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+      <span>{label}</span>
+      {activeMenu === id && <ChevronRight className="ml-auto h-4 w-4" />}
+    </button>
+  );
+
   return (
-    <div className="min-h-screen bg-black text-gray-100 flex">
-      {renderSidebar()}
-      
-      <main className="flex-1 p-8 overflow-y-auto">
-        {activeMenu === 'deduper' && renderDeduper()}
-        {activeMenu === 'organizer' && renderOrganizer()}
-        {activeMenu === 'completer' && renderCompleter()}
-        {activeMenu === 'scheduler' && renderScheduler()}
-        {activeMenu === 'settings' && renderSettings()}
-      </main>
+    <div className="flex h-screen overflow-hidden bg-background">
+      {/* Sidebar (Desktop) */}
+      <aside className="hidden md:flex w-64 flex-col border-r bg-card/50 backdrop-blur-xl">
+        <div className="p-6 border-b flex items-center gap-3">
+          <div className="p-2 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/20">
+            <Activity size={20} />
+          </div>
+          <span className="font-black text-lg tracking-tighter uppercase italic">{t('app.title')}</span>
+        </div>
+        
+        <nav className="flex-1 p-4 space-y-1">
+          <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mb-2 tracking-widest">Main Menu</div>
+          <SidebarItem id="deduper" label={t('app.deduper')} icon={Trash2} />
+          <SidebarItem id="organizer" label={t('app.organizer')} icon={FolderTree} />
+          <SidebarItem id="completer" label={t('app.completer')} icon={Sparkles} />
+          
+          <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mt-6 mb-2 tracking-widest">System</div>
+          <SidebarItem id="scheduler" label={t('app.scheduler')} icon={Calendar} />
+          <SidebarItem id="settings" label={t('app.settings')} icon={Settings} />
+        </nav>
+
+        <div className="p-4 border-t space-y-4">
+           <Button variant="outline" className="w-full justify-between" onClick={toggleLanguage}>
+              <div className="flex items-center gap-2">
+                <Globe size={14} />
+                <span className="text-xs">{i18n.language === 'en' ? 'English' : '简体中文'}</span>
+              </div>
+              <ChevronRight size={12} className="text-muted-foreground" />
+           </Button>
+
+           <div className="flex items-center gap-3 px-3">
+              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-primary to-primary/50 flex items-center justify-center text-[10px] font-black">ADMIN</div>
+              <div className="flex flex-col">
+                 <span className="text-xs font-bold">Local Host</span>
+                 <span className="text-[10px] text-muted-foreground">v1.0.0-PRO</span>
+              </div>
+           </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Header / Mobile Trigger */}
+        <header className="h-16 border-b flex items-center justify-between px-6 bg-card/50 backdrop-blur-xl shrink-0">
+           <div className="flex items-center gap-4">
+              <div className="md:hidden p-2 hover:bg-accent rounded-md">
+                 <Menu size={20} />
+              </div>
+              <div className="h-4 w-px bg-border hidden md:block mx-2" />
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                 <span>{t('app.title')}</span>
+                 <ChevronRight size={12} />
+                 <span className="text-foreground font-bold">{t(`app.${activeMenu}`)}</span>
+              </div>
+           </div>
+
+           <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
+                 {theme === 'dark' ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-muted-foreground" />}
+              </Button>
+              <div className="h-4 w-px bg-border mx-2" />
+              <div className="relative hidden sm:block">
+                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                 <Input className="pl-9 h-9 w-48 lg:w-64 bg-accent/50 border-none" placeholder="Search music..." />
+              </div>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                 <AlertCircle size={20} className="text-muted-foreground" />
+              </Button>
+           </div>
+        </header>
+
+        {/* Scrollable Main Section */}
+        <main className="flex-1 overflow-y-auto p-6 md:p-10 bg-muted/20 custom-scrollbar">
+           <div className="max-w-7xl mx-auto animate-in fade-in duration-700 slide-in-from-bottom-2">
+              {activeMenu === 'deduper' && renderDeduper()}
+              {activeMenu === 'organizer' && renderOrganizer()}
+              {activeMenu === 'completer' && renderCompleter()}
+              {activeMenu === 'scheduler' && renderScheduler()}
+              {activeMenu === 'settings' && renderSettings()}
+           </div>
+        </main>
+      </div>
 
       <style>{`
-        input[type="text"], input[type="number"] {
-          background: #0a0a0a;
-          border: 1px solid #333;
-          border-radius: 8px;
-          padding: 10px 14px;
-          font-size: 14px;
-          color: #eee;
-          width: 100%;
-          outline: none;
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
         }
-        input[type="text"]:focus { border-color: #3b82f6; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: hsl(var(--muted));
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: hsl(var(--muted-foreground) / 0.5);
+        }
       `}</style>
     </div>
   );

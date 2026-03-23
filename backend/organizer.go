@@ -6,33 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
 	lrcExts = []string{".lrc", ".txt", ".srt", ".ass", ".vtt"}
-	orgProgress struct {
-		sync.RWMutex
-		IsRunning bool
-		Processed int
-		Total     int
-		Status    string
-	}
 )
 
 func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
-	orgProgress.Lock()
-	orgProgress.IsRunning = true
-	orgProgress.Processed = 0
-	orgProgress.Status = "Initializing..."
-	orgProgress.Unlock()
-
-	defer func() {
-		orgProgress.Lock()
-		orgProgress.IsRunning = false
-		orgProgress.Status = "Done"
-		orgProgress.Unlock()
-	}()
+	broadcastProgress("organize", gin.H{"isRunning": true, "processed": 0, "total": 0, "status": "Initializing..."})
+	defer broadcastProgress("organize", gin.H{"isRunning": false, "status": "Done"})
 
 	var songs []SongFile
 	if err := db.Where("deleted = ?", false).Find(&songs).Error; err != nil {
@@ -40,10 +24,9 @@ func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
 		return
 	}
 
-	orgProgress.Lock()
-	orgProgress.Total = len(songs)
-	orgProgress.Status = "Organizing..."
-	orgProgress.Unlock()
+	total := len(songs)
+	processed := 0
+	broadcastProgress("organize", gin.H{"isRunning": true, "processed": 0, "total": total, "status": "Organizing..."})
 
 	for _, song := range songs {
 		if _, err := os.Stat(song.Path); os.IsNotExist(err) {
@@ -75,9 +58,10 @@ func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
 			// In copy mode, we don't necessarily update the path in DB unless we want to track the new one
 		}
 
-		orgProgress.Lock()
-		orgProgress.Processed++
-		orgProgress.Unlock()
+		processed++
+		if processed%10 == 0 {
+			broadcastProgress("organize", gin.H{"isRunning": true, "processed": processed, "total": total, "status": "Organizing..."})
+		}
 	}
 }
 

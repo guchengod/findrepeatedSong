@@ -58,19 +58,19 @@ func apiStartOrganize(c *gin.Context) {
 }
 
 func apiStartComplete(c *gin.Context) {
-	go doComplete()
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if req.Path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
+		return
+	}
+	go doComplete(req.Path)
 	c.JSON(http.StatusOK, gin.H{"message": "Completion started"})
-}
-
-func apiCompleteStatus(c *gin.Context) {
-	completeProgress.RLock()
-	defer completeProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": completeProgress.IsRunning,
-		"processed": completeProgress.Processed,
-		"total":     completeProgress.Total,
-		"status":    completeProgress.Status,
-	})
 }
 
 // Existing Scan & Analyze APIs (slightly modified to support multiple paths)
@@ -86,17 +86,6 @@ func apiStartScan(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Scan started"})
 }
 
-// Reuse existing status and progress handlers...
-func apiScanProgress(c *gin.Context) {
-	scanProgress.RLock()
-	defer scanProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": scanProgress.IsRunning,
-		"scanned":   scanProgress.Scanned,
-		"message":   scanProgress.TotalMsg,
-	})
-}
-
 func apiStartAnalyze(c *gin.Context) {
 	var req struct {
 		Similarity float64 `json:"similarity"`
@@ -106,16 +95,6 @@ func apiStartAnalyze(c *gin.Context) {
 	}
 	go doAnalyze(req.Similarity)
 	c.JSON(http.StatusOK, gin.H{"message": "Analysis started"})
-}
-
-func apiAnalyzeProgress(c *gin.Context) {
-	analyzeProgress.RLock()
-	defer analyzeProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": analyzeProgress.IsRunning,
-		"percent":   analyzeProgress.Percent,
-		"message":   analyzeProgress.TotalMsg,
-	})
 }
 
 func apiGetGroups(c *gin.Context) {
@@ -203,25 +182,4 @@ func apiAutoDelete(c *gin.Context) {
 	c.ShouldBindJSON(&req)
 	go doAutoDelete(req.Strategies)
 	c.JSON(http.StatusOK, gin.H{"message": "Started"})
-}
-
-func apiAutoDeleteProgress(c *gin.Context) {
-	autoProgress.RLock()
-	defer autoProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": autoProgress.IsRunning,
-		"percent":   autoProgress.Percent,
-		"message":   autoProgress.TotalMsg,
-	})
-}
-
-func apiOrganizeStatus(c *gin.Context) {
-	orgProgress.RLock()
-	defer orgProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": orgProgress.IsRunning,
-		"processed": orgProgress.Processed,
-		"total":     orgProgress.Total,
-		"status":    orgProgress.Status,
-	})
 }

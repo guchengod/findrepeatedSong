@@ -2,18 +2,9 @@ package main
 
 import (
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
-
-var pipelineStatus struct {
-	sync.RWMutex
-	IsRunning bool
-	Stage     string // "scan", "analyze", "delete", "done"
-	StartedAt time.Time
-}
 
 func apiFullPipeline(c *gin.Context) {
 	var req struct {
@@ -32,64 +23,15 @@ func apiFullPipeline(c *gin.Context) {
 		req.Similarity = 0.8
 	}
 
-	pipelineStatus.Lock()
-	if pipelineStatus.IsRunning {
-		pipelineStatus.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "Pipeline already running"})
-		return
-	}
-	pipelineStatus.IsRunning = true
-	pipelineStatus.Stage = "scan"
-	pipelineStatus.StartedAt = time.Now()
-	pipelineStatus.Unlock()
-
 	go func() {
-		defer func() {
-			pipelineStatus.Lock()
-			pipelineStatus.IsRunning = false
-			pipelineStatus.Stage = "done"
-			pipelineStatus.Unlock()
-		}()
-
-		// 1. Scan
+		broadcastProgress("pipeline", gin.H{"isRunning": true, "stage": "scan"})
 		doScan(req.Paths)
-		for {
-			scanProgress.RLock()
-			running := scanProgress.IsRunning
-			scanProgress.RUnlock()
-			if !running {
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
 
-		// 2. Analyze
-		pipelineStatus.Lock()
-		pipelineStatus.Stage = "analyze"
-		pipelineStatus.Unlock()
-		
+		broadcastProgress("pipeline", gin.H{"isRunning": true, "stage": "analyze"})
 		doAnalyze(req.Similarity)
-		for {
-			analyzeProgress.RLock()
-			running := analyzeProgress.IsRunning
-			analyzeProgress.RUnlock()
-			if !running {
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
+
+		broadcastProgress("pipeline", gin.H{"isRunning": false, "stage": "done"})
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"message": "Search started"})
-}
-
-func apiPipelineProgress(c *gin.Context) {
-	pipelineStatus.RLock()
-	defer pipelineStatus.RUnlock()
-	
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": pipelineStatus.IsRunning,
-		"stage":     pipelineStatus.Stage,
-		"elapsed":   time.Since(pipelineStatus.StartedAt).Seconds(),
-	})
 }

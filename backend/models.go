@@ -10,6 +10,7 @@ type SongFile struct {
 	Album          string    `json:"album" gorm:"index"`
 	Title          string    `json:"title" gorm:"index"`
 	NormalizedName string    `json:"normalizedName" gorm:"index"`
+	Duration       float64   `json:"duration"`
 	Size           int64     `json:"size"`
 	Ext            string    `json:"ext"`
 	GroupID        string    `json:"groupId" gorm:"index"`
