@@ -11,6 +11,12 @@ export default defineConfig({
   build: {
     outDir: '../backend/static',
     emptyOutDir: true,
+    commonjsOptions: {
+      include: [/node_modules/],
+    },
+  },
+  optimizeDeps: {
+    include: ['qnn-react-cron', 'cronstrue'],
   },
   server: {
     proxy: {

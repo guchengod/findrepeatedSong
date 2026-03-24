@@ -108,6 +108,7 @@ func doAnalyze(similarityThreshold float64) {
 	}
 
 	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 100, "status": "Saving groups..."})
+	refreshStats()
 
 	groups := make(map[int][]uint)
 	for i := 0; i < totalItems; i++ {

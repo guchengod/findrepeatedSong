@@ -238,6 +238,7 @@ func doScan(rootPaths []string) {
 		saveBatch(batch)
 	}
 	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scan finished, saving... "})
+	refreshStats()
 }
 
 func saveBatch(batch []SongFile) {

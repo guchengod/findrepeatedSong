@@ -1,19 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { 
-  Activity, Trash2, 
-  Loader2, FolderTree, 
+import {
+  Activity, Trash2,
+  Loader2, FolderTree,
   Settings, Calendar, Sparkles,
   ChevronLeft, ChevronRight,
   Menu, Globe,
-  Check, AlertCircle,
+  Check,
   FileMusic, Search, HardDrive,
   Clock, Layers, Info,
-  Sun, Moon
+  Sun, Moon, Wifi, WifiOff
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import './i18n';
 import { cn } from './lib/utils';
+import { Dashboard } from './components/Dashboard';
+import { SettingsDrawer } from './components/SettingsDrawer';
+import { CronBuilder } from './components/CronBuilder';
+import { SchedulerHistory } from './components/SchedulerHistory';
+import { PathBrowser } from './components/PathBrowser';
+import './theme/cyberpunk.css';
 
 // --- Types ---
 
@@ -36,12 +42,23 @@ interface AppConfig {
   desc: string;
 }
 
+interface RunRecord {
+  id: string;
+  timestamp: string;
+  status: 'COMPLETE' | 'FAILED';
+  duration_ms: number;
+  error?: string;
+}
+
 interface ScheduleTask {
   id: number;
   name: string;
   cron: string;
   isActive: boolean;
   lastRun: string;
+  nextRun: string;
+  runHistory: string;
+  runHistoryArr?: RunRecord[];
 }
 
 const API_BASE = '/api';
@@ -85,20 +102,6 @@ const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HT
   }
 );
 
-const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type, ...props }, ref) => (
-    <input
-      type={type}
-      className={cn(
-        "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      ref={ref}
-      {...props}
-    />
-  )
-);
-
 const Progress = ({ value, className }: { value: number, className?: string }) => (
   <div className={cn("relative h-2 w-full overflow-hidden rounded-full bg-secondary", className)}>
     <div
@@ -124,13 +127,18 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, v
 
 // --- Main App ---
 
+type MenuItem = 'home' | 'deduper' | 'organizer' | 'completer' | 'scheduler';
+type ActiveMenu = { parent: MenuItem, child?: string };
+
 function App() {
   const { t, i18n } = useTranslation();
-  const [activeMenu, setActiveMenu] = useState<'deduper' | 'organizer' | 'completer' | 'scheduler' | 'settings'>('deduper');
+  const [activeMenu, setActiveMenu] = useState<ActiveMenu>({ parent: 'home' });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [configs, setConfigs] = useState<AppConfig[]>([]);
   const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  
+  const [wsConnected, setWsConnected] = useState(false);
+
   // Progress States
   const [scanProgress, setScanProgress] = useState({ isRunning: false, scanned: 0, message: '' });
   const [analyzeProgress, setAnalyzeProgress] = useState({ isRunning: false, percent: 0, message: '' });
@@ -144,7 +152,7 @@ function App() {
   const [totalGroups, setTotalGroups] = useState(0);
   const [page, setPage] = useState(1);
   const pageSize = 10;
-  
+
   const [similarity, setSimilarity] = useState(0.8);
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>(['source_path']);
@@ -154,7 +162,7 @@ function App() {
     loadConfigs();
     loadSchedules();
     loadGroups();
-    
+
     // Theme initialization
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -185,48 +193,70 @@ function App() {
     }
   }, [configs]);
 
+  // WebSocket with reconnection
   useEffect(() => {
     let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname === 'localhost' ? 'localhost:8080' : window.location.host;
     const wsUrl = `${wsProtocol}//${host}/ws`;
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let attempts = 0;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        const { topic, data } = msg;
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        setWsConnected(true);
+        attempts = 0;
+      };
+      ws.onclose = () => {
+        setWsConnected(false);
+        attempts++;
+        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+        reconnectTimeout = setTimeout(connect, delay);
+      };
+      ws.onerror = () => ws.close();
 
-        switch (topic) {
-          case 'pipeline':
-            setPipelineProgress(data);
-            if (!data.isRunning) loadGroups();
-            break;
-          case 'scan':
-            setScanProgress(data);
-            break;
-          case 'analyze':
-            setAnalyzeProgress(data);
-            break;
-          case 'organize':
-            setOrgStatus(data);
-            break;
-          case 'complete':
-            setCompleteStatus(data);
-            if (data.detail) {
-              setCompleteLogs(prev => [data.detail, ...prev].slice(0, 100));
-            }
-            break;
-          case 'auto_delete':
-            setAutoProgress(data);
-            if (!data.isRunning) loadGroups();
-            break;
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          const { topic, data } = msg;
+
+          switch (topic) {
+            case 'pipeline':
+              setPipelineProgress(data);
+              if (!data.isRunning) loadGroups();
+              break;
+            case 'scan':
+              setScanProgress(data);
+              break;
+            case 'analyze':
+              setAnalyzeProgress(data);
+              break;
+            case 'organize':
+              setOrgStatus(data);
+              break;
+            case 'complete':
+              setCompleteStatus(data);
+              if (data.detail) {
+                setCompleteLogs(prev => [data.detail, ...prev].slice(0, 100));
+              }
+              break;
+            case 'auto_delete':
+              setAutoProgress(data);
+              if (!data.isRunning) loadGroups();
+              break;
+          }
+        } catch (e) {
+          console.error("Failed to parse websocket message", e);
         }
-      } catch (e) {
-        console.error("Failed to parse websocket message", e);
-      }
+      };
     };
 
-    return () => ws.close();
+    connect();
+    return () => {
+      clearTimeout(reconnectTimeout);
+      ws?.close();
+    };
   }, []);
 
   const loadConfigs = async () => {
@@ -249,11 +279,6 @@ function App() {
     loadGroups();
   }, [page]);
 
-  const updateConfig = async (key: string, value: string) => {
-    await axios.post(`${API_BASE}/config`, { key, value });
-    loadConfigs();
-  };
-
   const updateSchedule = async (task: ScheduleTask) => {
     await axios.post(`${API_BASE}/schedules`, task);
     loadSchedules();
@@ -263,6 +288,10 @@ function App() {
 
   const toggleLanguage = () => {
     i18n.changeLanguage(i18n.language === 'en' ? 'zh' : 'en');
+  };
+
+  const navigate = (menu: MenuItem, child?: string) => {
+    setActiveMenu({ parent: menu, child: child });
   };
 
   // --- Sub-Views ---
@@ -321,8 +350,8 @@ function App() {
             <div className="grid gap-2">
               {['source_path', 'target_path'].map(p => (
                 <div key={p} className="flex items-center gap-2">
-                   <input 
-                    type="radio" id={p} name="path" checked={selectedPaths.includes(p)} 
+                   <input
+                    type="radio" id={p} name="path" checked={selectedPaths.includes(p)}
                     onChange={() => setSelectedPaths([p])}
                     className="w-4 h-4 text-primary"
                   />
@@ -337,9 +366,9 @@ function App() {
               <div className="flex items-center gap-2"><Layers size={16} /> {t('deduper.similarity')}</div>
               <span className="text-primary font-mono">{Math.round(similarity * 100)}%</span>
             </div>
-            <input 
-              type="range" min="0.5" max="1.0" step="0.05" 
-              value={similarity} 
+            <input
+              type="range" min="0.5" max="1.0" step="0.05"
+              value={similarity}
               onChange={(e) => setSimilarity(parseFloat(e.target.value))}
               className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
             />
@@ -353,7 +382,7 @@ function App() {
               {['quality', 'size_desc', 'size_asc'].map(s => (
                 <Badge key={s} variant={selectedStrategies.includes(s) ? 'default' : 'outline'}>
                   <button onClick={() => {
-                    setSelectedStrategies(prev => 
+                    setSelectedStrategies(prev =>
                       prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
                     );
                   }}>
@@ -462,13 +491,13 @@ function App() {
             <div className="space-y-4">
               <label className="text-sm font-semibold">{t('organizer.mode')}</label>
               <div className="flex p-1 bg-secondary rounded-lg max-w-sm">
-                <button 
+                <button
                   onClick={() => setOrganizeMode('move')}
                   className={cn("flex-1 py-2 rounded-md text-sm font-bold transition-all", organizeMode === 'move' ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")}
                 >
                   {t('organizer.move')}
                 </button>
-                <button 
+                <button
                   onClick={() => setOrganizeMode('copy')}
                   className={cn("flex-1 py-2 rounded-md text-sm font-bold transition-all", organizeMode === 'copy' ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")}
                 >
@@ -480,11 +509,23 @@ function App() {
             <div className="grid gap-4 md:grid-cols-2">
                <div className="space-y-2 p-4 bg-muted/30 rounded-lg border border-dashed">
                   <div className="text-[10px] font-bold text-muted-foreground uppercase">{t('organizer.source')}</div>
-                  <div className="text-sm font-mono truncate">{getConfig('source_path')}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-mono truncate flex-1">{getConfig('source_path') || '—'}</div>
+                    <PathBrowser
+                      value={getConfig('source_path')}
+                      onChange={(path) => { axios.post(`${API_BASE}/config`, { key: 'source_path', value: path }); }}
+                    />
+                  </div>
                </div>
                <div className="space-y-2 p-4 bg-primary/5 rounded-lg border border-primary/20">
                   <div className="text-[10px] font-bold text-primary uppercase">{t('organizer.target')}</div>
-                  <div className="text-sm font-mono truncate">{getConfig('target_path')}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-mono truncate flex-1">{getConfig('target_path') || '—'}</div>
+                    <PathBrowser
+                      value={getConfig('target_path')}
+                      onChange={(path) => { axios.post(`${API_BASE}/config`, { key: 'target_path', value: path }); }}
+                    />
+                  </div>
                </div>
             </div>
 
@@ -548,8 +589,14 @@ function App() {
                     </button>
                   ))}
                 </div>
-                <div className="p-3 bg-secondary/50 rounded-lg text-xs font-mono truncate border italic">
-                   {getConfig(selectedPaths[0])}
+                <div className="flex items-center gap-2">
+                  <div className="p-3 bg-secondary/50 rounded-lg text-xs font-mono truncate border italic flex-1">
+                     {getConfig(selectedPaths[0]) || '—'}
+                  </div>
+                  <PathBrowser
+                    value={getConfig(selectedPaths[0])}
+                    onChange={(path) => { axios.post(`${API_BASE}/config`, { key: selectedPaths[0], value: path }); }}
+                  />
                 </div>
               </div>
 
@@ -631,7 +678,7 @@ function App() {
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <h3 className="text-lg font-bold uppercase tracking-tight">{task.name}</h3>
-                  <p className="text-xs text-muted-foreground mt-1">Automatic Background Execution</p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('scheduler.bgExecution')}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className={cn(
@@ -640,11 +687,11 @@ function App() {
                   )}>
                     {task.isActive ? t('scheduler.active') : t('scheduler.disabled')}
                   </div>
-                  <button 
+                  <button
                     onClick={() => updateSchedule({...task, isActive: !task.isActive})}
                     className="text-[10px] font-bold text-primary hover:underline underline-offset-4"
                   >
-                    Toggle
+                    {t('scheduler.toggle')}
                   </button>
                 </div>
               </div>
@@ -652,21 +699,24 @@ function App() {
               <div className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase">{t('scheduler.cron')}</label>
-                  <Input 
+                  <CronBuilder
                     value={task.cron}
-                    onChange={(e) => {
-                      const newS = schedules.map(s => s.id === task.id ? {...s, cron: e.target.value} : s);
-                      setSchedules(newS);
+                    onChange={(cron) => {
+                      const updated = schedules.map(s => s.id === task.id ? { ...s, cron } : s);
+                      setSchedules(updated);
                     }}
-                    onBlur={() => updateSchedule(task)}
-                    className="font-mono h-8 text-xs"
+                    onSave={(cron) => updateSchedule({ ...task, cron })}
                   />
                 </div>
 
                 <div className="flex justify-between items-center text-xs border-t pt-4">
                   <span className="text-muted-foreground uppercase font-bold text-[10px]">{t('scheduler.lastRun')}</span>
-                  <span className="font-mono">{task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never'}</span>
+                  <span className="font-mono">{task.lastRun ? new Date(task.lastRun).toLocaleString() : t('scheduler.never')}</span>
                 </div>
+
+                {task.runHistoryArr && task.runHistoryArr.length > 0 && (
+                  <SchedulerHistory runs={task.runHistoryArr} taskName={task.name} />
+                )}
               </div>
             </Card>
           ))}
@@ -675,58 +725,36 @@ function App() {
     );
   };
 
-  const renderSettings = () => {
-    return (
-      <div className="max-w-2xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
-          <p className="text-muted-foreground">{t('settings.subtitle')}</p>
-        </div>
+  // --- Layout Components ---
 
-        <Card className="p-8 space-y-8">
-          <div className="grid gap-6">
-            {configs.map(conf => (
-              <div key={conf.key} className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{conf.desc || conf.key}</label>
-                <div className="flex gap-2">
-                   <Input 
-                    value={conf.value} 
-                    onChange={(e) => {
-                      const newC = configs.map(c => c.key === conf.key ? {...c, value: e.target.value} : c);
-                      setConfigs(newC);
-                    }}
-                    placeholder={`Enter ${conf.key}...`}
-                    className="font-mono text-xs"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => updateConfig(conf.key, conf.value)}>
-                    {t('settings.save')}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+  const SidebarItem = ({ id, label, icon: Icon, indent = false }: { id: MenuItem, label: string, icon: any, indent?: boolean }) => {
+    const isActive = activeMenu.parent === id;
+    return (
+      <button
+        onClick={() => navigate(id)}
+        className={cn(
+          "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all group",
+          isActive && !indent ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          indent && !isActive && "pl-10 text-muted-foreground/70 hover:pl-12"
+        )}
+      >
+        <Icon size={18} className={cn("transition-colors", isActive && !indent ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+        <span>{label}</span>
+        {isActive && !indent && <ChevronRight className="ml-auto h-4 w-4" />}
+      </button>
     );
   };
 
-  // --- Layout Components ---
-
-  const SidebarItem = ({ id, label, icon: Icon }: { id: typeof activeMenu, label: string, icon: any }) => (
-    <button
-      onClick={() => setActiveMenu(id)}
-      className={cn(
-        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all group",
-        activeMenu === id 
-        ? "bg-primary text-primary-foreground shadow-sm" 
-        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-      )}
-    >
-      <Icon size={18} className={cn("transition-colors", activeMenu === id ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")} />
-      <span>{label}</span>
-      {activeMenu === id && <ChevronRight className="ml-auto h-4 w-4" />}
-    </button>
+  const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+    <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mb-2 tracking-widest">
+      {children}
+    </div>
   );
+
+  const activeTabLabel = () => {
+    if (activeMenu.parent === 'home') return t('app.home');
+    return t(`app.${activeMenu.parent}`);
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -738,16 +766,14 @@ function App() {
           </div>
           <span className="font-black text-lg tracking-tighter uppercase italic">{t('app.title')}</span>
         </div>
-        
+
         <nav className="flex-1 p-4 space-y-1">
-          <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mb-2 tracking-widest">Main Menu</div>
+          <SectionLabel>{t('app.mainMenu')}</SectionLabel>
+          <SidebarItem id="home" label={t('app.home')} icon={Activity} />
           <SidebarItem id="deduper" label={t('app.deduper')} icon={Trash2} />
           <SidebarItem id="organizer" label={t('app.organizer')} icon={FolderTree} />
           <SidebarItem id="completer" label={t('app.completer')} icon={Sparkles} />
-          
-          <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mt-6 mb-2 tracking-widest">System</div>
           <SidebarItem id="scheduler" label={t('app.scheduler')} icon={Calendar} />
-          <SidebarItem id="settings" label={t('app.settings')} icon={Settings} />
         </nav>
 
         <div className="p-4 border-t space-y-4">
@@ -771,7 +797,7 @@ function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Header / Mobile Trigger */}
+        {/* Header */}
         <header className="h-16 border-b flex items-center justify-between px-6 bg-card/50 backdrop-blur-xl shrink-0">
            <div className="flex items-center gap-4">
               <div className="md:hidden p-2 hover:bg-accent rounded-md">
@@ -781,21 +807,33 @@ function App() {
               <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                  <span>{t('app.title')}</span>
                  <ChevronRight size={12} />
-                 <span className="text-foreground font-bold">{t(`app.${activeMenu}`)}</span>
+                 <span className="text-foreground font-bold">{activeTabLabel()}</span>
               </div>
            </div>
 
            <div className="flex items-center gap-2">
+              {/* WS Status */}
+              <div className="flex items-center gap-1.5">
+                {wsConnected ? (
+                  <Wifi size={12} className="text-green-500" />
+                ) : (
+                  <WifiOff size={12} className="text-destructive" />
+                )}
+                <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: wsConnected ? '#39ff14' : '#ff2d6a' }}>
+                  {wsConnected ? 'ONLINE' : 'OFFLINE'}
+                </span>
+              </div>
+
+              <div className="h-4 w-px bg-border mx-2" />
+
               <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
                  {theme === 'dark' ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-muted-foreground" />}
               </Button>
+
               <div className="h-4 w-px bg-border mx-2" />
-              <div className="relative hidden sm:block">
-                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                 <Input className="pl-9 h-9 w-48 lg:w-64 bg-accent/50 border-none" placeholder="Search music..." />
-              </div>
-              <Button variant="ghost" size="icon" className="rounded-full">
-                 <AlertCircle size={20} className="text-muted-foreground" />
+
+              <Button variant="ghost" size="icon" className="rounded-full" onClick={() => setSettingsOpen(true)}>
+                 <Settings size={20} className="text-muted-foreground" />
               </Button>
            </div>
         </header>
@@ -803,14 +841,17 @@ function App() {
         {/* Scrollable Main Section */}
         <main className="flex-1 overflow-y-auto p-6 md:p-10 bg-muted/20 custom-scrollbar">
            <div className="max-w-7xl mx-auto animate-in fade-in duration-700 slide-in-from-bottom-2">
-              {activeMenu === 'deduper' && renderDeduper()}
-              {activeMenu === 'organizer' && renderOrganizer()}
-              {activeMenu === 'completer' && renderCompleter()}
-              {activeMenu === 'scheduler' && renderScheduler()}
-              {activeMenu === 'settings' && renderSettings()}
+              {activeMenu.parent === 'home' && <Dashboard onOpenSettings={() => setSettingsOpen(true)} />}
+              {activeMenu.parent === 'deduper' && renderDeduper()}
+              {activeMenu.parent === 'organizer' && renderOrganizer()}
+              {activeMenu.parent === 'completer' && !activeMenu.child && renderCompleter()}
+              {activeMenu.parent === 'scheduler' && renderScheduler()}
            </div>
         </main>
       </div>
+
+      {/* Settings Drawer */}
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

@@ -1,9 +1,17 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +37,33 @@ func apiUpdateConfig(c *gin.Context) {
 func apiGetSchedules(c *gin.Context) {
 	var tasks []ScheduleTask
 	db.Find(&tasks)
-	c.JSON(http.StatusOK, tasks)
+	// Parse runHistory JSON string into array for frontend
+	type scheduleResponse struct {
+		ID         uint      `json:"id"`
+		Name       string    `json:"name"`
+		Cron       string    `json:"cron"`
+		IsActive   bool      `json:"isActive"`
+		LastRun    time.Time `json:"lastRun"`
+		NextRun    time.Time `json:"nextRun"`
+		RunHistory string    `json:"runHistory"`
+		RunHistoryArr []RunRecord `json:"runHistoryArr"`
+	}
+	responses := make([]scheduleResponse, len(tasks))
+	for i, t := range tasks {
+		responses[i] = scheduleResponse{
+			ID:         t.ID,
+			Name:       t.Name,
+			Cron:       t.Cron,
+			IsActive:   t.IsActive,
+			LastRun:    t.LastRun,
+			NextRun:    t.NextRun,
+			RunHistory: t.RunHistory,
+		}
+		if t.RunHistory != "" {
+			json.Unmarshal([]byte(t.RunHistory), &responses[i].RunHistoryArr)
+		}
+	}
+	c.JSON(http.StatusOK, responses)
 }
 
 func apiUpdateSchedule(c *gin.Context) {
@@ -162,6 +196,7 @@ func apiDeleteFile(c *gin.Context) {
 
 	os.Remove(f.Path)
 	db.Model(&f).Update("deleted", true)
+	refreshStats()
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
@@ -172,6 +207,7 @@ func apiDeleteGroup(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 	doManualDelete(req.GroupID, req.KeepID)
+	refreshStats()
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
@@ -182,4 +218,156 @@ func apiAutoDelete(c *gin.Context) {
 	c.ShouldBindJSON(&req)
 	go doAutoDelete(req.Strategies)
 	c.JSON(http.StatusOK, gin.H{"message": "Started"})
+}
+
+// --- Browse Path API ---
+func apiBrowsePath(c *gin.Context) {
+	dir := c.Query("dir")
+
+	// Security: resolve the path and check it's within allowed roots
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		return
+	}
+	// Normalize to prevent /../ bypass of prefix check
+	absDir = filepath.Clean(absDir)
+
+	// Get allowed roots from config
+	var sourcePath, targetPath string
+	var cfg AppConfig
+	if err := db.Where("key = ?", "source_path").First(&cfg).Error; err == nil {
+		sourcePath, _ = filepath.Abs(cfg.Value)
+	}
+	if err := db.Where("key = ?", "target_path").First(&cfg).Error; err == nil {
+		targetPath, _ = filepath.Abs(cfg.Value)
+	}
+
+	// Allow root directory listing, or subdirectories of configured paths
+	allowed := absDir == "/" || absDir == ""
+	if !allowed && sourcePath != "" {
+		if strings.HasPrefix(absDir, sourcePath) {
+			allowed = true
+		}
+	}
+	if !allowed && targetPath != "" {
+		if strings.HasPrefix(absDir, targetPath) {
+			allowed = true
+		}
+	}
+
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: path not within configured source or target paths"})
+		return
+	}
+
+	if absDir == "" || absDir == "/" {
+		// List root volumes on darwin, or root on linux
+		if runtime.GOOS == "darwin" {
+			absDir = "/"
+		}
+	}
+
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Cannot read directory: " + err.Error()})
+		return
+	}
+
+	type FileEntry struct {
+		Name     string `json:"name"`
+		Path     string `json:"path"`
+		IsDir    bool   `json:"isDir"`
+		Size     int64  `json:"size"`
+		Modified string `json:"modified"`
+	}
+
+	result := make([]FileEntry, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		entryPath := filepath.Join(absDir, entry.Name())
+		result = append(result, FileEntry{
+			Name:     entry.Name(),
+			Path:     entryPath,
+			IsDir:    entry.IsDir(),
+			Size:     info.Size(),
+			Modified: info.ModTime().Format(time.RFC3339),
+		})
+	}
+
+	// Sort: dirs first, then by name
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return result[i].Name < result[j].Name
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"entries": result,
+		"parent":  filepath.Dir(absDir),
+	})
+}
+
+// --- Stats API ---
+
+const statsCacheTTL = 5 * time.Minute
+
+var statsCache struct {
+	totalSongs      int64
+	totalDuplicates int64
+	storageUsedGB   float64
+	lastUpdated     time.Time
+}
+var statsMu sync.Mutex
+
+func RefreshStats() {
+	if db == nil {
+		return // DB not yet initialized
+	}
+	var count int64
+	db.Model(&SongFile{}).Where("deleted = ?", false).Count(&count)
+	statsCache.totalSongs = count
+
+	var sizeSum sql.NullInt64
+	db.Model(&SongFile{}).Where("deleted = ?", false).Select("COALESCE(SUM(size), 0)").Row().Scan(&sizeSum)
+	statsCache.storageUsedGB = float64(sizeSum.Int64) / 1e9
+
+	// Count duplicates: groups with >1 member
+	var groups []string
+	db.Model(&SongFile{}).Where("deleted = ? AND group_id != ''", false).Distinct("group_id").Pluck("group_id", &groups)
+	var dupCount int64
+	for _, gid := range groups {
+		var cnt int64
+		db.Model(&SongFile{}).Where("group_id = ? AND deleted = ?", gid, false).Count(&cnt)
+		if cnt > 1 {
+			dupCount += cnt - 1
+		}
+	}
+	statsCache.totalDuplicates = dupCount
+	statsCache.lastUpdated = time.Now()
+}
+
+// refreshStats is the internal version called after DB is ready
+func refreshStats() {
+	RefreshStats()
+}
+
+func apiGetStats(c *gin.Context) {
+	// Invalidate cache if stale (5 min TTL), with lock to prevent thundering herd
+	statsMu.Lock()
+	if time.Since(statsCache.lastUpdated) > statsCacheTTL {
+		refreshStats()
+	}
+	statsMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{
+		"total_songs":      statsCache.totalSongs,
+		"total_duplicates": statsCache.totalDuplicates,
+		"storage_used_gb":  statsCache.storageUsedGB,
+		"jobs_running":      GetActiveJobs(),
+		"last_updated":      statsCache.lastUpdated.Format(time.RFC3339),
+	})
 }

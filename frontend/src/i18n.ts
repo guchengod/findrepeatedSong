@@ -7,11 +7,13 @@ const resources = {
     translation: {
       "app": {
         "title": "MUSIC ENGINE",
+        "home": "Home",
+        "homeMenu": "Command Deck",
+        "mainMenu": "Main Menu",
         "deduper": "Deduper",
         "organizer": "Organizer",
-        "completer": "Completer",
-        "scheduler": "Scheduler",
-        "settings": "Settings"
+        "completer": "Metadata Completer",
+        "scheduler": "Scheduler"
       },
       "deduper": {
         "title": "Deduper",
@@ -49,12 +51,17 @@ const resources = {
         "cron": "Cron Expression",
         "lastRun": "Last Run",
         "active": "Active",
-        "disabled": "Disabled"
+        "disabled": "Disabled",
+        "toggle": "Toggle",
+        "bgExecution": "Automatic Background Execution",
+        "never": "Never"
       },
       "settings": {
-        "title": "Settings",
-        "subtitle": "Global configuration",
-        "save": "Save"
+        "title": "System Config",
+        "subtitle": "Configure Your Setup",
+        "save": "Save",
+        "reset": "Reset",
+        "close": "Close"
       },
       "common": {
         "loading": "Loading...",
@@ -62,6 +69,37 @@ const resources = {
         "done": "Done",
         "confirm": "Confirm",
         "cancel": "Cancel"
+      },
+      "pathBrowser": {
+        "title": "Select Directory",
+        "select": "Select",
+        "empty": "No entries",
+        "selected": "Selected"
+      },
+      "cronBuilder": {
+        "everyMinute": "Every minute",
+        "every5Minutes": "Every 5 minutes",
+        "everyHour": "Every hour",
+        "dailyMidnight": "Daily at midnight",
+        "daily2AM": "Daily at 2AM",
+        "weeklySunday": "Weekly on Sunday",
+        "monthly": "Monthly",
+        "next5Runs": "Next 5 runs"
+      },
+      "schedulerHistory": {
+        "noHistory": "No History — Task Never Run"
+      },
+      "dashboard": {
+        "online": "Online",
+        "offline": "Offline",
+        "noRecentMissions": "No Recent Missions",
+        "activeMission": "Active Mission",
+        "recentMissions": "Recent Missions",
+        "signalLost": "SIGNAL LOST — RECONNECTING...",
+        "totalSongs": "Total Songs",
+        "duplicates": "Duplicates",
+        "storageUsed": "Storage Used",
+        "jobsRunning": "Jobs Running"
       }
     }
   },
@@ -69,11 +107,13 @@ const resources = {
     translation: {
       "app": {
         "title": "音乐引擎",
+        "home": "首页",
+        "homeMenu": "指挥台",
+        "mainMenu": "主菜单",
         "deduper": "去重工具",
         "organizer": "音乐整理",
         "completer": "元数据补全",
-        "scheduler": "任务调度",
-        "settings": "系统设置"
+        "scheduler": "任务调度"
       },
       "deduper": {
         "title": "去重工具",
@@ -111,12 +151,17 @@ const resources = {
         "cron": "Cron 表达式",
         "lastRun": "上次运行",
         "active": "已激活",
-        "disabled": "已禁用"
+        "disabled": "已禁用",
+        "toggle": "切换",
+        "bgExecution": "自动后台执行",
+        "never": "从未"
       },
       "settings": {
-        "title": "系统设置",
-        "subtitle": "全局参数配置",
-        "save": "保存"
+        "title": "系统配置",
+        "subtitle": "配置您的设置",
+        "save": "保存",
+        "reset": "重置",
+        "close": "关闭"
       },
       "common": {
         "loading": "加载中...",
@@ -124,6 +169,37 @@ const resources = {
         "done": "完成",
         "confirm": "确认",
         "cancel": "取消"
+      },
+      "pathBrowser": {
+        "title": "选择目录",
+        "select": "选择",
+        "empty": "目录为空",
+        "selected": "已选择"
+      },
+      "cronBuilder": {
+        "everyMinute": "每分钟",
+        "every5Minutes": "每5分钟",
+        "everyHour": "每小时",
+        "dailyMidnight": "每天午夜",
+        "daily2AM": "每天凌晨2点",
+        "weeklySunday": "每周日",
+        "monthly": "每月",
+        "next5Runs": "接下来5次执行"
+      },
+      "schedulerHistory": {
+        "noHistory": "无历史记录 — 任务从未运行"
+      },
+      "dashboard": {
+        "online": "在线",
+        "offline": "离线",
+        "noRecentMissions": "无最近任务",
+        "activeMission": "执行中的任务",
+        "recentMissions": "最近任务",
+        "signalLost": "信号丢失 — 重新连接中...",
+        "totalSongs": "歌曲总数",
+        "duplicates": "重复歌曲",
+        "storageUsed": "存储使用",
+        "jobsRunning": "运行任务"
       }
     }
   }

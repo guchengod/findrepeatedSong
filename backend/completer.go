@@ -275,7 +275,10 @@ func doMBSearch(artist, title string) (MBRecordingResponse, error) {
 
 func doComplete(rootPath string) {
 	broadcastProgress("complete", gin.H{"isRunning": true, "processed": 0, "total": 0, "status": "Starting scan..."})
-	defer broadcastProgress("complete", gin.H{"isRunning": false, "status": "Done"})
+	defer func() {
+		broadcastProgress("complete", gin.H{"isRunning": false, "status": "Done"})
+		refreshStats()
+	}()
 
 	processed := 0
 

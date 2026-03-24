@@ -16,7 +16,10 @@ var (
 
 func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
 	broadcastProgress("organize", gin.H{"isRunning": true, "processed": 0, "total": 0, "status": "Initializing..."})
-	defer broadcastProgress("organize", gin.H{"isRunning": false, "status": "Done"})
+	defer func() {
+		broadcastProgress("organize", gin.H{"isRunning": false, "status": "Done"})
+		refreshStats()
+	}()
 
 	var songs []SongFile
 	if err := db.Where("deleted = ?", false).Find(&songs).Error; err != nil {

@@ -28,6 +28,9 @@ func main() {
 	// Seed default data
 	seedData()
 
+	// Pre-warm stats cache
+	RefreshStats()
+
 	// Initialize Scheduler
 	initScheduler()
 	go hub.run()
@@ -59,6 +62,12 @@ func main() {
 		// Config
 		api.GET("/config", apiGetConfig)
 		api.POST("/config", apiUpdateConfig)
+
+		// Stats
+		api.GET("/stats", apiGetStats)
+
+		// Browse
+		api.GET("/browse-path", apiBrowsePath)
 	}
 
 	r.GET("/ws", serveWsGin)

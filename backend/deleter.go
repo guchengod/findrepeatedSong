@@ -26,7 +26,10 @@ func isLossless(ext string) bool {
 
 func doAutoDelete(strategies []string) {
 	broadcastProgress("auto_delete", gin.H{"isRunning": true, "percent": 0, "status": "Fetching groups..."})
-	defer broadcastProgress("auto_delete", gin.H{"isRunning": false, "percent": 100, "status": "Done"})
+	defer func() {
+		broadcastProgress("auto_delete", gin.H{"isRunning": false, "percent": 100, "status": "Done"})
+		refreshStats()
+	}()
 
 	if len(strategies) == 0 {
 		var conf AppConfig
