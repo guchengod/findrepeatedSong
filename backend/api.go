@@ -336,17 +336,18 @@ func RefreshStats() {
 	db.Model(&SongFile{}).Where("deleted = ?", false).Select("COALESCE(SUM(size), 0)").Row().Scan(&sizeSum)
 	statsCache.storageUsedGB = float64(sizeSum.Int64) / 1e9
 
-	// Count duplicates: groups with >1 member
-	var groups []string
-	db.Model(&SongFile{}).Where("deleted = ? AND group_id != ''", false).Distinct("group_id").Pluck("group_id", &groups)
+	// Count duplicates: groups with >1 member — single query using subquery
 	var dupCount int64
-	for _, gid := range groups {
-		var cnt int64
-		db.Model(&SongFile{}).Where("group_id = ? AND deleted = ?", gid, false).Count(&cnt)
-		if cnt > 1 {
-			dupCount += cnt - 1
-		}
-	}
+	db.Raw(`
+		SELECT COALESCE(SUM(cnt - 1), 0)
+		FROM (
+			SELECT group_id, COUNT(*) as cnt
+			FROM song_files
+			WHERE deleted = false AND group_id != ''
+			GROUP BY group_id
+			HAVING COUNT(*) > 1
+		) AS groups_with_dups
+	`).Scan(&dupCount)
 	statsCache.totalDuplicates = dupCount
 	statsCache.lastUpdated = time.Now()
 }

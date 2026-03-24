@@ -237,8 +237,30 @@ func doScan(rootPaths []string) {
 	if len(batch) > 0 {
 		saveBatch(batch)
 	}
-	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scan finished, saving... "})
+	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scan finished, recovering orphans..."})
+	// Async orphan cleanup: un-delete records whose files still exist on disk.
+	// If the scan was interrupted, files that were marked deleted may still be present.
+	go recoverOrphanedFiles()
 	refreshStats()
+}
+
+// recoverOrphanedFiles finds deleted SongFile records whose files still exist on disk
+// and un-deletes them. Runs asynchronously after scan to handle interrupted scans.
+func recoverOrphanedFiles() {
+	var deleted []SongFile
+	db.Where("deleted = ?", true).Find(&deleted)
+	recovered := 0
+	for _, f := range deleted {
+		if _, err := os.Stat(f.Path); err == nil {
+			// File still exists — un-delete it
+			db.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", false)
+			recovered++
+		}
+	}
+	if recovered > 0 {
+		log.Printf("recoverOrphanedFiles: recovered %d files", recovered)
+		refreshStats()
+	}
 }
 
 func saveBatch(batch []SongFile) {
