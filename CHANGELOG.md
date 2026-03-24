@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1.0] - 2026-03-24
+
+### Security
+- Path traversal bypass in `apiBrowsePath` fixed via `filepath.Clean()` normalization
+- Stats cache thundering herd prevented via mutex lock in `apiGetStats`
+- WebSocket broadcast made non-blocking to prevent goroutine leaks in tests/CI
+
+### Fixed
+- Production black screen: replaced CJS `require()` of `qnn-react-cron` with ESM dynamic `import()`
+- Scan interruption data loss: added async orphan recovery that un-deletes files whose paths still exist on disk
+- N+1 query in `RefreshStats()` duplicate counting: replaced O(n) per-group queries with single SQL subquery
+- Missing stats refresh after file/group deletion operations
+
+### Added
+- New frontend Dashboard with real-time mission tracking and metric cards
+- `recoverOrphanedFiles()` for automatic recovery of accidentally deleted records
+
 ## [0.1.0.0] - 2026-03-24
 
 ### Added
