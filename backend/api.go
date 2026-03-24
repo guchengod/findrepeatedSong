@@ -1,9 +1,17 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +37,33 @@ func apiUpdateConfig(c *gin.Context) {
 func apiGetSchedules(c *gin.Context) {
 	var tasks []ScheduleTask
 	db.Find(&tasks)
-	c.JSON(http.StatusOK, tasks)
+	// Parse runHistory JSON string into array for frontend
+	type scheduleResponse struct {
+		ID         uint      `json:"id"`
+		Name       string    `json:"name"`
+		Cron       string    `json:"cron"`
+		IsActive   bool      `json:"isActive"`
+		LastRun    time.Time `json:"lastRun"`
+		NextRun    time.Time `json:"nextRun"`
+		RunHistory string    `json:"runHistory"`
+		RunHistoryArr []RunRecord `json:"runHistoryArr"`
+	}
+	responses := make([]scheduleResponse, len(tasks))
+	for i, t := range tasks {
+		responses[i] = scheduleResponse{
+			ID:         t.ID,
+			Name:       t.Name,
+			Cron:       t.Cron,
+			IsActive:   t.IsActive,
+			LastRun:    t.LastRun,
+			NextRun:    t.NextRun,
+			RunHistory: t.RunHistory,
+		}
+		if t.RunHistory != "" {
+			json.Unmarshal([]byte(t.RunHistory), &responses[i].RunHistoryArr)
+		}
+	}
+	c.JSON(http.StatusOK, responses)
 }
 
 func apiUpdateSchedule(c *gin.Context) {
@@ -58,19 +92,19 @@ func apiStartOrganize(c *gin.Context) {
 }
 
 func apiStartComplete(c *gin.Context) {
-	go doComplete()
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if req.Path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
+		return
+	}
+	go doComplete(req.Path)
 	c.JSON(http.StatusOK, gin.H{"message": "Completion started"})
-}
-
-func apiCompleteStatus(c *gin.Context) {
-	completeProgress.RLock()
-	defer completeProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": completeProgress.IsRunning,
-		"processed": completeProgress.Processed,
-		"total":     completeProgress.Total,
-		"status":    completeProgress.Status,
-	})
 }
 
 // Existing Scan & Analyze APIs (slightly modified to support multiple paths)
@@ -86,17 +120,6 @@ func apiStartScan(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Scan started"})
 }
 
-// Reuse existing status and progress handlers...
-func apiScanProgress(c *gin.Context) {
-	scanProgress.RLock()
-	defer scanProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": scanProgress.IsRunning,
-		"scanned":   scanProgress.Scanned,
-		"message":   scanProgress.TotalMsg,
-	})
-}
-
 func apiStartAnalyze(c *gin.Context) {
 	var req struct {
 		Similarity float64 `json:"similarity"`
@@ -106,16 +129,6 @@ func apiStartAnalyze(c *gin.Context) {
 	}
 	go doAnalyze(req.Similarity)
 	c.JSON(http.StatusOK, gin.H{"message": "Analysis started"})
-}
-
-func apiAnalyzeProgress(c *gin.Context) {
-	analyzeProgress.RLock()
-	defer analyzeProgress.RUnlock()
-	c.JSON(http.StatusOK, gin.H{
-		"isRunning": analyzeProgress.IsRunning,
-		"percent":   analyzeProgress.Percent,
-		"message":   analyzeProgress.TotalMsg,
-	})
 }
 
 func apiGetGroups(c *gin.Context) {
@@ -183,6 +196,7 @@ func apiDeleteFile(c *gin.Context) {
 
 	os.Remove(f.Path)
 	db.Model(&f).Update("deleted", true)
+	refreshStats()
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
@@ -193,6 +207,7 @@ func apiDeleteGroup(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 	doManualDelete(req.GroupID, req.KeepID)
+	refreshStats()
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
 }
 
@@ -205,23 +220,155 @@ func apiAutoDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Started"})
 }
 
-func apiAutoDeleteProgress(c *gin.Context) {
-	autoProgress.RLock()
-	defer autoProgress.RUnlock()
+// --- Browse Path API ---
+func apiBrowsePath(c *gin.Context) {
+	dir := c.Query("dir")
+
+	// Security: resolve the path and check it's within allowed roots
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		return
+	}
+	// Normalize to prevent /../ bypass of prefix check
+	absDir = filepath.Clean(absDir)
+
+	// Get allowed roots from config
+	var sourcePath, targetPath string
+	var cfg AppConfig
+	if err := db.Where("key = ?", "source_path").First(&cfg).Error; err == nil {
+		sourcePath, _ = filepath.Abs(cfg.Value)
+	}
+	if err := db.Where("key = ?", "target_path").First(&cfg).Error; err == nil {
+		targetPath, _ = filepath.Abs(cfg.Value)
+	}
+
+	// Allow root directory listing, or subdirectories of configured paths
+	allowed := absDir == "/" || absDir == ""
+	if !allowed && sourcePath != "" {
+		if strings.HasPrefix(absDir, sourcePath) {
+			allowed = true
+		}
+	}
+	if !allowed && targetPath != "" {
+		if strings.HasPrefix(absDir, targetPath) {
+			allowed = true
+		}
+	}
+
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: path not within configured source or target paths"})
+		return
+	}
+
+	if absDir == "" || absDir == "/" {
+		// List root volumes on darwin, or root on linux
+		if runtime.GOOS == "darwin" {
+			absDir = "/"
+		}
+	}
+
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Cannot read directory: " + err.Error()})
+		return
+	}
+
+	type FileEntry struct {
+		Name     string `json:"name"`
+		Path     string `json:"path"`
+		IsDir    bool   `json:"isDir"`
+		Size     int64  `json:"size"`
+		Modified string `json:"modified"`
+	}
+
+	result := make([]FileEntry, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		entryPath := filepath.Join(absDir, entry.Name())
+		result = append(result, FileEntry{
+			Name:     entry.Name(),
+			Path:     entryPath,
+			IsDir:    entry.IsDir(),
+			Size:     info.Size(),
+			Modified: info.ModTime().Format(time.RFC3339),
+		})
+	}
+
+	// Sort: dirs first, then by name
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return result[i].Name < result[j].Name
+	})
+
 	c.JSON(http.StatusOK, gin.H{
-		"isRunning": autoProgress.IsRunning,
-		"percent":   autoProgress.Percent,
-		"message":   autoProgress.TotalMsg,
+		"entries": result,
+		"parent":  filepath.Dir(absDir),
 	})
 }
 
-func apiOrganizeStatus(c *gin.Context) {
-	orgProgress.RLock()
-	defer orgProgress.RUnlock()
+// --- Stats API ---
+
+const statsCacheTTL = 5 * time.Minute
+
+var statsCache struct {
+	totalSongs      int64
+	totalDuplicates int64
+	storageUsedGB   float64
+	lastUpdated     time.Time
+}
+var statsMu sync.Mutex
+
+func RefreshStats() {
+	if db == nil {
+		return // DB not yet initialized
+	}
+	var count int64
+	db.Model(&SongFile{}).Where("deleted = ?", false).Count(&count)
+	statsCache.totalSongs = count
+
+	var sizeSum sql.NullInt64
+	db.Model(&SongFile{}).Where("deleted = ?", false).Select("COALESCE(SUM(size), 0)").Row().Scan(&sizeSum)
+	statsCache.storageUsedGB = float64(sizeSum.Int64) / 1e9
+
+	// Count duplicates: groups with >1 member — single query using subquery
+	var dupCount int64
+	db.Raw(`
+		SELECT COALESCE(SUM(cnt - 1), 0)
+		FROM (
+			SELECT group_id, COUNT(*) as cnt
+			FROM song_files
+			WHERE deleted = false AND group_id != ''
+			GROUP BY group_id
+			HAVING COUNT(*) > 1
+		) AS groups_with_dups
+	`).Scan(&dupCount)
+	statsCache.totalDuplicates = dupCount
+	statsCache.lastUpdated = time.Now()
+}
+
+// refreshStats is the internal version called after DB is ready
+func refreshStats() {
+	RefreshStats()
+}
+
+func apiGetStats(c *gin.Context) {
+	// Invalidate cache if stale (5 min TTL), with lock to prevent thundering herd
+	statsMu.Lock()
+	if time.Since(statsCache.lastUpdated) > statsCacheTTL {
+		refreshStats()
+	}
+	statsMu.Unlock()
 	c.JSON(http.StatusOK, gin.H{
-		"isRunning": orgProgress.IsRunning,
-		"processed": orgProgress.Processed,
-		"total":     orgProgress.Total,
-		"status":    orgProgress.Status,
+		"total_songs":      statsCache.totalSongs,
+		"total_duplicates": statsCache.totalDuplicates,
+		"storage_used_gb":  statsCache.storageUsedGB,
+		"jobs_running":      GetActiveJobs(),
+		"last_updated":      statsCache.lastUpdated.Format(time.RFC3339),
 	})
 }

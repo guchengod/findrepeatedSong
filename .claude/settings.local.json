@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -fsSL https://bun.sh/install)",
+      "Bash(bash)",
+      "Read(//Users/galvin/.claude/skills/gstack/**)",
+      "Bash(~/.bun/bin/bun ./setup)",
+      "Bash(bash ~/.claude/skills/gstack/setup)",
+      "Bash(source ~/.zshrc)",
+      "Bash(source ~/.bashrc)",
+      "Bash(mkdir -p /Users/galvin/Documents/code/go/findrepeatedSong/.claude/skills)",
+      "Bash(ln -snf ~/.claude/skills/gstack /Users/galvin/Documents/code/go/findrepeatedSong/.claude/skills/gstack)",
+      "Skill(plan-ceo-review)",
+      "Bash(~/.claude/skills/gstack/bin/gstack-review-log '{\"skill\":\"plan-eng-review\",\"timestamp\":\"2026-03-24T13:15:00Z\",\"status\":\"clean\",\"unresolved\":0,\"critical_gaps\":0,\"issues_found\":5,\"mode\":\"FULL_REVIEW\",\"commit\":\"6494b6c\"}')",
+      "Bash(~/.claude/skills/gstack/bin/gstack-review-read)",
+      "Bash(go build:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:8080/api/schedules)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8080/api/config)",
+      "Skill(browse)",
+      "mcp__MiniMax__web_search",
+      "Bash(curl -s http://localhost:8080/api/stats)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s \"http://localhost:8080/api/browse-path?dir=/\")",
+      "Bash(pkill -f \"go run \\\\.\")",
+      "Bash(pkill -f \"findrepeatedSong\")",
+      "Bash(kill -9 34084)",
+      "Bash(open:*)",
+      "Skill(review)",
+      "Bash(sudo chown:*)",
+      "Bash(kill -9 37777)",
+      "Bash(kill -9 5968)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(xargs kill:*)"
+    ]
+  }
+}

@@ -28,8 +28,12 @@ func main() {
 	// Seed default data
 	seedData()
 
+	// Pre-warm stats cache
+	RefreshStats()
+
 	// Initialize Scheduler
 	initScheduler()
+	go hub.run()
 
 	r := gin.Default()
 	r.Use(cors.Default())
@@ -38,24 +42,18 @@ func main() {
 	{
 		// Deduper
 		api.POST("/scan", apiStartScan)
-		api.GET("/scan/progress", apiScanProgress)
 		api.POST("/analyze", apiStartAnalyze)
-		api.GET("/analyze/progress", apiAnalyzeProgress)
 		api.GET("/groups", apiGetGroups)
 		api.POST("/delete", apiDeleteGroup)
 		api.POST("/delete-file", apiDeleteFile)
 		api.POST("/auto-delete", apiAutoDelete)
-		api.GET("/auto-delete/progress", apiAutoDeleteProgress)
 		api.POST("/full-pipeline", apiFullPipeline)
-		api.GET("/pipeline/progress", apiPipelineProgress)
 
 		// Organizer
 		api.POST("/organize", apiStartOrganize)
-		api.GET("/organize/status", apiOrganizeStatus)
-
+		
 		// Completer
 		api.POST("/complete", apiStartComplete)
-		api.GET("/complete/status", apiCompleteStatus)
 
 		// Schedules
 		api.GET("/schedules", apiGetSchedules)
@@ -64,7 +62,15 @@ func main() {
 		// Config
 		api.GET("/config", apiGetConfig)
 		api.POST("/config", apiUpdateConfig)
+
+		// Stats
+		api.GET("/stats", apiGetStats)
+
+		// Browse
+		api.GET("/browse-path", apiBrowsePath)
 	}
+
+	r.GET("/ws", serveWsGin)
 
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path

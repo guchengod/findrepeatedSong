@@ -1,0 +1,582 @@
+/* Cyberpunk Theme - for FindRepeatedSong */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@400;700;900&family=Inter:wght@400;500;600&display=swap');
+
+/* ============================================
+   CSS VARIABLES
+   ============================================ */
+
+:root {
+  /* Cyberpunk Color Palette */
+  --cb-bg: #0a0a0f;
+  --cb-bg-2: #0f0f1a;
+  --cb-cyan: #00f0ff;
+  --cb-pink: #ff2d6a;
+  --cb-green: #39ff14;
+  --cb-amber: #ffb800;
+  --cb-text: #e0e0e0;
+  --cb-muted: #4a4a6a;
+  --cb-border: rgba(0, 240, 255, 0.15);
+  --cb-glow: rgba(0, 240, 255, 0.3);
+  --cb-glow-strong: rgba(0, 240, 255, 0.6);
+  --cb-glow-pink: rgba(255, 45, 106, 0.4);
+  --cb-glow-green: rgba(57, 255, 20, 0.4);
+
+  /* Spacing */
+  --radius: 0.5rem;
+  --radius-sm: 0.25rem;
+  --radius-lg: 0.75rem;
+}
+
+/* ============================================
+   GLOBAL / BODY
+   ============================================ */
+
+body {
+  background-color: var(--cb-bg);
+  color: var(--cb-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Cyberpunk grid background */
+.cb-grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  background-position: center center;
+}
+
+/* Scanlines overlay */
+.cb-scanlines::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 3px,
+    rgba(0, 240, 255, 0.015) 3px,
+    rgba(0, 240, 255, 0.015) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+
+.cb-font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.cb-font-display {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+}
+
+/* Chromatic aberration on hover for metric numbers */
+.cb-chromatic:hover {
+  text-shadow:
+    -1px 0 #ff2d6a,
+    1px 0 #00f0ff;
+}
+
+/* ============================================
+   CARDS / CONTAINERS
+   ============================================ */
+
+.cb-card {
+  background: rgba(10, 10, 15, 0.8);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(10px);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  color: var(--cb-text);
+}
+
+.cb-card:hover {
+  border-color: rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+}
+
+.cb-card-glow {
+  box-shadow:
+    0 0 5px var(--cb-cyan),
+    0 0 20px var(--cb-glow),
+    0 0 40px rgba(0, 240, 255, 0.1);
+}
+
+.cb-card-pink {
+  border-color: rgba(255, 45, 106, 0.3);
+}
+
+.cb-card-pink:hover {
+  border-color: rgba(255, 45, 106, 0.6);
+  box-shadow: 0 0 20px var(--cb-glow-pink);
+}
+
+.cb-card-green {
+  border-color: rgba(57, 255, 20, 0.3);
+}
+
+.cb-card-green:hover {
+  border-color: rgba(57, 255, 20, 0.6);
+  box-shadow: 0 0 20px var(--cb-glow-green);
+}
+
+/* ============================================
+   NEON GLOW EFFECTS
+   ============================================ */
+
+.cb-glow {
+  text-shadow: 0 0 10px var(--cb-cyan), 0 0 20px var(--cb-glow);
+}
+
+.cb-glow-pink {
+  text-shadow: 0 0 10px var(--cb-pink), 0 0 20px var(--cb-glow-pink);
+}
+
+.cb-glow-green {
+  text-shadow: 0 0 10px var(--cb-green), 0 0 20px var(--cb-glow-green);
+}
+
+.cb-glow-amber {
+  text-shadow: 0 0 10px var(--cb-amber), 0 0 20px rgba(255, 184, 0, 0.4);
+}
+
+.cb-box-glow {
+  box-shadow: 0 0 5px var(--cb-cyan), 0 0 20px var(--cb-glow), 0 0 40px var(--cb-glow);
+}
+
+.cb-box-glow-pink {
+  box-shadow: 0 0 5px var(--cb-pink), 0 0 20px var(--cb-glow-pink);
+}
+
+/* ============================================
+   PROGRESS BEAM
+   ============================================ */
+
+.cb-beam-track {
+  height: 6px;
+  background: rgba(0, 240, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.cb-beam-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cb-cyan), rgba(0, 240, 255, 0.7));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  position: relative;
+  box-shadow: 0 0 10px var(--cb-cyan), 0 0 20px var(--cb-glow);
+}
+
+.cb-beam-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6));
+  animation: cb-beam-shine 1.5s ease-in-out infinite;
+}
+
+@keyframes cb-beam-shine {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.cb-beam-complete .cb-beam-fill {
+  background: linear-gradient(90deg, var(--cb-green), rgba(57, 255, 20, 0.7));
+  box-shadow: 0 0 10px var(--cb-green), 0 0 20px var(--cb-glow-green);
+}
+
+/* ============================================
+   TERMINAL READOUT
+   ============================================ */
+
+.cb-terminal {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--cb-cyan);
+  padding: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.cb-terminal::before {
+  content: '>';
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  animation: cb-blink 1s step-end infinite;
+}
+
+@keyframes cb-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cb-terminal-line {
+  padding-left: 1.5rem;
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cb-terminal-line.success { color: var(--cb-green); }
+.cb-terminal-line.error { color: var(--cb-pink); }
+.cb-terminal-line.warning { color: var(--cb-amber); }
+.cb-terminal-line.info { color: var(--cb-cyan); }
+
+/* ============================================
+   INPUTS
+   ============================================ */
+
+.cb-input {
+  background: rgba(10, 10, 15, 0.8);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius-sm);
+  color: var(--cb-text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 0.5rem 0.75rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+  width: 100%;
+}
+
+.cb-input:focus {
+  border-color: var(--cb-cyan);
+  box-shadow: 0 0 10px var(--cb-glow);
+}
+
+.cb-input::placeholder {
+  color: var(--cb-muted);
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.cb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cb-btn-primary {
+  background: transparent;
+  border-color: var(--cb-cyan);
+  color: var(--cb-cyan);
+}
+
+.cb-btn-primary:hover {
+  background: rgba(0, 240, 255, 0.1);
+  box-shadow: 0 0 15px var(--cb-glow), inset 0 0 15px rgba(0, 240, 255, 0.05);
+}
+
+.cb-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.cb-btn-pink {
+  background: transparent;
+  border-color: var(--cb-pink);
+  color: var(--cb-pink);
+}
+
+.cb-btn-pink:hover {
+  background: rgba(255, 45, 106, 0.1);
+  box-shadow: 0 0 15px var(--cb-glow-pink);
+}
+
+.cb-btn-green {
+  background: transparent;
+  border-color: var(--cb-green);
+  color: var(--cb-green);
+}
+
+.cb-btn-green:hover {
+  background: rgba(57, 255, 20, 0.1);
+  box-shadow: 0 0 15px var(--cb-glow-green);
+}
+
+/* ============================================
+   BADGE / STATUS
+   ============================================ */
+
+.cb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cb-badge-cyan {
+  background: rgba(0, 240, 255, 0.1);
+  color: var(--cb-cyan);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.cb-badge-pink {
+  background: rgba(255, 45, 106, 0.1);
+  color: var(--cb-pink);
+  border: 1px solid rgba(255, 45, 106, 0.3);
+}
+
+.cb-badge-green {
+  background: rgba(57, 255, 20, 0.1);
+  color: var(--cb-green);
+  border: 1px solid rgba(57, 255, 20, 0.3);
+}
+
+.cb-badge-amber {
+  background: rgba(255, 184, 0, 0.1);
+  color: var(--cb-amber);
+  border: 1px solid rgba(255, 184, 0, 0.3);
+}
+
+.cb-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.cb-status-dot.cyan { background: var(--cb-cyan); box-shadow: 0 0 6px var(--cb-cyan); }
+.cb-status-dot.green { background: var(--cb-green); box-shadow: 0 0 6px var(--cb-green); animation: cb-pulse 2s infinite; }
+.cb-status-dot.pink { background: var(--cb-pink); box-shadow: 0 0 6px var(--cb-pink); }
+.cb-status-dot.amber { background: var(--cb-amber); box-shadow: 0 0 6px var(--cb-amber); }
+.cb-status-dot.muted { background: var(--cb-muted); }
+
+@keyframes cb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ============================================
+   SIDEBAR / NAV
+   ============================================ */
+
+.cb-sidebar {
+  background: rgba(10, 10, 15, 0.9);
+  border-right: 1px solid var(--cb-border);
+  backdrop-filter: blur(20px);
+}
+
+.cb-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  color: var(--cb-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+}
+
+.cb-nav-item:hover {
+  color: var(--cb-text);
+  background: rgba(0, 240, 255, 0.05);
+}
+
+.cb-nav-item.active {
+  color: var(--cb-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+}
+
+.cb-nav-section-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--cb-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 0.5rem 0.75rem 0.25rem;
+  margin-top: 0.5rem;
+}
+
+/* ============================================
+   SETTINGS DRAWER
+   ============================================ */
+
+.cb-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  background: rgba(10, 10, 15, 0.98);
+  border-left: 1px solid var(--cb-border);
+  z-index: 1000;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+  backdrop-filter: blur(20px);
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.cb-drawer.open {
+  transform: translateX(0);
+}
+
+.cb-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.cb-drawer-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ============================================
+   DASHBOARD METRIC CARDS
+   ============================================ */
+
+.cb-metric-card {
+  background: rgba(10, 10, 15, 0.8);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.cb-metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--cb-cyan), transparent);
+  opacity: 0.6;
+}
+
+.cb-metric-card:hover {
+  border-color: rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 30px rgba(0, 240, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+/* Gray background cards need white body text */
+.cb-metric-card,
+.cb-card {
+  color: #ffffff;
+}
+
+.cb-metric-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #8a8aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.5rem;
+}
+
+.cb-metric-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--cb-cyan);
+  line-height: 1;
+  text-shadow: 0 0 20px var(--cb-glow);
+  transition: text-shadow 0.3s ease;
+}
+
+.cb-metric-value:hover {
+  text-shadow: 0 0 30px var(--cb-cyan), 0 0 60px var(--cb-glow);
+}
+
+/* ============================================
+   SIGNAL LOST BANNER
+   ============================================ */
+
+.cb-signal-banner {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 45, 106, 0.15);
+  border: 1px solid var(--cb-pink);
+  border-radius: var(--radius);
+  padding: 0.5rem 1.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--cb-pink);
+  z-index: 10000;
+  box-shadow: 0 0 20px var(--cb-glow-pink);
+  animation: cb-signal-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes cb-signal-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ============================================
+   REDUCED MOTION
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .cb-scanlines::before {
+    display: none;
+  }
+
+  .cb-beam-fill::after {
+    animation: none;
+  }
+}

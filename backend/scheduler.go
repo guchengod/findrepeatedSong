@@ -2,14 +2,18 @@ package main
 
 import (
 	"log"
+	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 )
 
 var (
 	cronRunner *cron.Cron
 	entryMap   = make(map[uint]cron.EntryID)
+	activeJobs int
+	activeMu   sync.Mutex
 )
 
 func initScheduler() {
@@ -27,25 +31,59 @@ func initScheduler() {
 
 func addTask(task ScheduleTask) {
 	id, err := cronRunner.AddFunc(task.Cron, func() {
-		log.Printf("Executing task: %s\n", task.Name)
-		
+		log.Printf("Executing scheduled task: %s\n", task.Name)
+
+		start := time.Now()
+		status := "COMPLETE"
+		var errMsg *string
+
+		// Increment active jobs counter
+		activeMu.Lock()
+		activeJobs++
+		activeMu.Unlock()
+
+		broadcastProgress("scheduler", gin.H{"isRunning": true, "task": task.Name, "status": "running"})
+
 		// Run task based on name
 		switch task.Name {
 		case "organize":
-			// We need a path from config
 			var conf AppConfig
 			db.Where("key = ?", "target_path").First(&conf)
 			if conf.Value != "" {
-				doOrganize(conf.Value, "move") // Default to move in auto
+				doOrganize(conf.Value, "move")
 			}
 		case "complete":
-			doComplete()
+			var conf AppConfig
+			db.Where("key = ?", "source_path").First(&conf)
+			if conf.Value != "" {
+				doComplete(conf.Value)
+			}
 		}
 
-		// Update last run
-		db.Model(&task).Updates(map[string]interface{}{
-			"last_run": time.Now(),
+		// Decrement active jobs counter
+		activeMu.Lock()
+		activeJobs--
+		activeMu.Unlock()
+
+		durationMs := time.Since(start).Milliseconds()
+		runRecord := RunRecord{
+			ID:        GenerateRunID(task.Name),
+			Timestamp: start,
+			Status:    status,
+			Duration:  durationMs,
+			Error:     errMsg,
+		}
+
+		// Reload task from DB to get current RunHistory, then append and save
+		var updatedTask ScheduleTask
+		db.First(&updatedTask, task.ID)
+		updatedTask.AddRunRecord(runRecord)
+		db.Model(&updatedTask).Updates(map[string]interface{}{
+			"last_run":    start,
+			"run_history": updatedTask.RunHistory,
 		})
+
+		broadcastProgress("scheduler", gin.H{"isRunning": false, "task": task.Name, "status": status})
 	})
 
 	if err == nil {
@@ -67,4 +105,11 @@ func updateTask(task ScheduleTask) {
 	if task.IsActive {
 		addTask(task)
 	}
+}
+
+// GetActiveJobs returns the current number of running scheduled jobs.
+func GetActiveJobs() int {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	return activeJobs
 }

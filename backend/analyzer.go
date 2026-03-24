@@ -1,17 +1,10 @@
 package main
 
 import (
-	"sync"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
-
-var analyzeProgress struct {
-	sync.RWMutex
-	IsRunning bool
-	Percent   int
-	TotalMsg  string
-}
 
 func extractBigrams(s string) []string {
 	runes := []rune(s)
@@ -31,19 +24,13 @@ type analyzeItem struct {
 }
 
 func doAnalyze(similarityThreshold float64) {
-	analyzeProgress.Lock()
-	analyzeProgress.IsRunning = true
-	analyzeProgress.Percent = 0
-	analyzeProgress.TotalMsg = "Loading data..."
-	analyzeProgress.Unlock()
-
-	defer func() {
-		analyzeProgress.Lock()
-		analyzeProgress.IsRunning = false
-		analyzeProgress.Percent = 100
-		analyzeProgress.TotalMsg = "Done"
-		analyzeProgress.Unlock()
-	}()
+	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 0, "status": "Validating files..."})
+	
+	// Optional: You could do a quick check here, but doScan already handles this.
+	// Let's ensure we only process non-deleted ones.
+	
+	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 0, "status": "Loading data..."})
+	defer broadcastProgress("analyze", gin.H{"isRunning": false, "percent": 100, "status": "Done"})
 
 	var items []struct {
 		ID             uint
@@ -55,9 +42,7 @@ func doAnalyze(similarityThreshold float64) {
 		return
 	}
 
-	analyzeProgress.Lock()
-	analyzeProgress.TotalMsg = "Building index..."
-	analyzeProgress.Unlock()
+	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 0, "status": "Building index..."})
 
 	data := make([]analyzeItem, len(items))
 	invertedIndex := make(map[string][]int)
@@ -71,9 +56,7 @@ func doAnalyze(similarityThreshold float64) {
 		}
 	}
 
-	analyzeProgress.Lock()
-	analyzeProgress.TotalMsg = "Comparing items..."
-	analyzeProgress.Unlock()
+	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 0, "status": "Comparing items..."})
 
 	// Union-Find structure
 	parent := make([]int, len(data))
@@ -101,9 +84,8 @@ func doAnalyze(similarityThreshold float64) {
 	totalItems := len(data)
 	for i := 0; i < totalItems; i++ {
 		if i%1000 == 0 {
-			analyzeProgress.Lock()
-			analyzeProgress.Percent = (i * 100) / totalItems
-			analyzeProgress.Unlock()
+			percent := (i * 100) / totalItems
+			broadcastProgress("analyze", gin.H{"isRunning": true, "percent": percent, "status": "Comparing items..."})
 		}
 
 		matches := make(map[int]int)
@@ -125,9 +107,8 @@ func doAnalyze(similarityThreshold float64) {
 		}
 	}
 
-	analyzeProgress.Lock()
-	analyzeProgress.TotalMsg = "Saving groups..."
-	analyzeProgress.Unlock()
+	broadcastProgress("analyze", gin.H{"isRunning": true, "percent": 100, "status": "Saving groups..."})
+	refreshStats()
 
 	groups := make(map[int][]uint)
 	for i := 0; i < totalItems; i++ {

@@ -6,21 +6,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	"gorm.io/gorm"
+	"github.com/gin-gonic/gin"
 )
 
 var (
 	losslessExts = map[string]bool{
-		".flac": true, ".wav": true, ".ape": true, ".alac": true,
-	}
-	
-	autoProgress struct {
-		sync.RWMutex
-		IsRunning bool
-		TotalMsg  string
-		Percent   int
+		// Mainstream Lossless
+		".flac": true, ".wav": true, ".aiff": true, ".aif": true, ".alac": true,
+		// Others / Audiophile
+		".ape": true, ".wv": true, ".tak": true,
 	}
 )
 
@@ -29,18 +25,10 @@ func isLossless(ext string) bool {
 }
 
 func doAutoDelete(strategies []string) {
-	autoProgress.Lock()
-	autoProgress.IsRunning = true
-	autoProgress.Percent = 0
-	autoProgress.TotalMsg = "Fetching groups..."
-	autoProgress.Unlock()
-
+	broadcastProgress("auto_delete", gin.H{"isRunning": true, "percent": 0, "status": "Fetching groups..."})
 	defer func() {
-		autoProgress.Lock()
-		autoProgress.IsRunning = false
-		autoProgress.Percent = 100
-		autoProgress.TotalMsg = "Done"
-		autoProgress.Unlock()
+		broadcastProgress("auto_delete", gin.H{"isRunning": false, "percent": 100, "status": "Done"})
+		refreshStats()
 	}()
 
 	if len(strategies) == 0 {
@@ -66,13 +54,17 @@ func doAutoDelete(strategies []string) {
 	totalGroups := len(groups)
 	processed := 0
 
+	if totalGroups == 0 {
+		broadcastProgress("auto_delete", gin.H{"isRunning": false, "percent": 100, "status": "No groups to process"})
+		return
+	}
+
 	db.Transaction(func(tx *gorm.DB) error {
 		for _, files := range groups {
 			processed++
-			if processed%100 == 0 {
-				autoProgress.Lock()
-				autoProgress.Percent = (processed * 100) / totalGroups
-				autoProgress.Unlock()
+			if processed%10 == 0 {
+				percent := (processed * 100) / totalGroups
+				broadcastProgress("auto_delete", gin.H{"isRunning": true, "percent": percent, "status": "Deleting..."})
 			}
 
 			if len(files) <= 1 {
@@ -133,8 +125,14 @@ func doAutoDelete(strategies []string) {
 				}
 
 				err := os.Remove(f.Path)
-				if err != nil && !os.IsNotExist(err) {
-					log.Println("Error deleting file:", f.Path, err)
+				if err != nil {
+					if os.IsNotExist(err) {
+						// File already gone — mark deleted in DB anyway
+						tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
+					} else {
+						// Real error — file still exists, DO NOT mark as deleted
+						log.Println("Error deleting file:", f.Path, err)
+					}
 					continue
 				}
 				tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
@@ -175,8 +173,14 @@ func doManualDelete(groupID string, keepID uint) {
 				}
 
 				err := os.Remove(f.Path)
-				if err != nil && !os.IsNotExist(err) {
-					log.Println("Error deleting file:", f.Path, err)
+				if err != nil {
+					if os.IsNotExist(err) {
+						// File already gone — mark deleted in DB anyway
+						tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
+					} else {
+						// Real error — file still exists, DO NOT mark as deleted
+						log.Println("Error deleting file:", f.Path, err)
+					}
 					continue
 				}
 				tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
