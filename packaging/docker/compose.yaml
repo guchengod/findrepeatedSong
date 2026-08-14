@@ -1,6 +1,6 @@
 services:
   music-deduper:
-    image: ghcr.io/guchengod/findrepeatedsong:${FINDREPEATEDSONG_VERSION:-0.1.1}
+    image: ${FINDREPEATEDSONG_IMAGE:-findrepeatedsong:0.1.1}
     container_name: findrepeatedsong
     restart: unless-stopped
     ports:
