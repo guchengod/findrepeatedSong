@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $env:FINDREPEATEDSONG_DATA_DIR = Join-Path $appDir "data"
 $env:FINDREPEATEDSONG_STATIC_DIR = Join-Path $appDir "static"
-if (-not $env:FINDREPEATEDSONG_PORT) { $env:FINDREPEATEDSONG_PORT = "8080" }
+if (-not $env:FINDREPEATEDSONG_PORT) { $env:FINDREPEATEDSONG_PORT = "38491" }
 
 $process = Start-Process -FilePath (Join-Path $appDir "findrepeatedsong.exe") -PassThru
 Start-Sleep -Seconds 1

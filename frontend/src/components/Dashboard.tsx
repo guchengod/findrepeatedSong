@@ -180,7 +180,7 @@ export const Dashboard: React.FC<{
   // WebSocket for real-time mission updates
   useEffect(() => {
     let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:8080' : window.location.host;
+    const host = window.location.hostname === 'localhost' ? 'localhost:38491' : window.location.host;
     const wsUrl = `${wsProtocol}//${host}/ws`;
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;

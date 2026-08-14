@@ -23,5 +23,5 @@ WORKDIR /app
 COPY --from=backend-builder /app/main .
 # Vite writes its production output to ../backend/static relative to /app.
 COPY --from=frontend-builder /backend/static ./static
-EXPOSE 8080
+EXPOSE 38491
 CMD ["./main"]

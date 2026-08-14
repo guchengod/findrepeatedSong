@@ -4,7 +4,7 @@ set -eu
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export FINDREPEATEDSONG_DATA_DIR="${APP_DIR}/data"
 export FINDREPEATEDSONG_STATIC_DIR="${APP_DIR}/static"
-export FINDREPEATEDSONG_PORT="${FINDREPEATEDSONG_PORT:-8080}"
+export FINDREPEATEDSONG_PORT="${FINDREPEATEDSONG_PORT:-38491}"
 
 "${APP_DIR}/findrepeatedsong" &
 SERVER_PID=$!
