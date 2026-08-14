@@ -103,7 +103,12 @@ func apiStartComplete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
 		return
 	}
-	go doComplete(req.Path)
+	if !startManagedJob("complete", func() { doComplete(req.Path) }, func(err error) {
+		broadcastProgress("complete", gin.H{"isRunning": false, "status": err.Error()})
+	}) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Metadata completion is already running"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Completion started"})
 }
 
@@ -157,7 +162,12 @@ func apiStartScan(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	go doScan(req.Paths)
+	if !startManagedJob("scan", func() { doScan(req.Paths) }, func(err error) {
+		broadcastProgress("scan", gin.H{"isRunning": false, "status": err.Error()})
+	}) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Scan is already running"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Scan started"})
 }
 

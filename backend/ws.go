@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -30,17 +31,70 @@ type Hub struct {
 
 var hub = Hub{
 	clients:    make(map[*Client]bool),
-	broadcast:  make(chan interface{}),
+	broadcast:  make(chan interface{}, 256),
 	register:   make(chan *Client),
 	unregister: make(chan *Client),
 }
 
+type progressMessage struct {
+	Topic string      `json:"topic"`
+	Data  interface{} `json:"data"`
+}
+
+var progressState = struct {
+	sync.RWMutex
+	messages map[string]progressMessage
+}{messages: make(map[string]progressMessage)}
+
+func currentProgressMessages() []progressMessage {
+	progressState.RLock()
+	defer progressState.RUnlock()
+	messages := make([]progressMessage, 0, len(progressState.messages))
+	for _, message := range progressState.messages {
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func (h *Hub) send(client *Client, message interface{}) bool {
+	select {
+	case client.send <- message:
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Hub) sendSnapshots(client *Client) bool {
+	for _, message := range currentProgressMessages() {
+		if !h.send(client, message) {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Hub) sendSnapshotsToAll() {
+	for client := range h.clients {
+		if !h.sendSnapshots(client) {
+			close(client.send)
+			delete(h.clients, client)
+		}
+	}
+}
+
 func (h *Hub) run() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			if !h.sendSnapshots(client) {
+				close(client.send)
+				delete(h.clients, client)
+			}
 			h.mu.Unlock()
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -52,13 +106,15 @@ func (h *Hub) run() {
 		case message := <-h.broadcast:
 			h.mu.Lock()
 			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
+				if !h.send(client, message) {
 					close(client.send)
 					delete(h.clients, client)
 				}
 			}
+			h.mu.Unlock()
+		case <-ticker.C:
+			h.mu.Lock()
+			h.sendSnapshotsToAll()
 			h.mu.Unlock()
 		}
 	}
@@ -100,14 +156,16 @@ func (c *Client) writePump() {
 }
 
 func broadcastProgress(topic string, data interface{}) {
-	msg := map[string]interface{}{
-		"topic": topic,
-		"data":  data,
-	}
-	// Non-blocking send — prevents tests from hanging when hub has no reader
+	message := progressMessage{Topic: topic, Data: data}
+	progressState.Lock()
+	progressState.messages[topic] = message
+	progressState.Unlock()
+
+	// Progress is cached for reconnecting clients. The buffered, non-blocking
+	// send keeps command tests from depending on a running WebSocket hub; a
+	// periodic snapshot makes a transient full queue self-healing for the UI.
 	select {
-	case hub.broadcast <- msg:
+	case hub.broadcast <- message:
 	default:
-		// No active listeners — progress is dropped (acceptable for tests/CI)
 	}
 }

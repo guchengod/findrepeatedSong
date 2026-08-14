@@ -23,15 +23,21 @@ func apiFullPipeline(c *gin.Context) {
 		req.Similarity = 0.8
 	}
 
-	go func() {
+	if !startManagedJob("pipeline", func() {
+		defer func() {
+			broadcastProgress("pipeline", gin.H{"isRunning": false, "stage": "done"})
+		}()
 		broadcastProgress("pipeline", gin.H{"isRunning": true, "stage": "scan"})
 		doScan(req.Paths)
 
 		broadcastProgress("pipeline", gin.H{"isRunning": true, "stage": "analyze"})
 		doAnalyze(req.Similarity)
-
-		broadcastProgress("pipeline", gin.H{"isRunning": false, "stage": "done"})
-	}()
+	}, func(err error) {
+		broadcastProgress("pipeline", gin.H{"isRunning": false, "stage": "failed", "status": err.Error()})
+	}) {
+		c.JSON(http.StatusConflict, gin.H{"error": "A scan pipeline is already running"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Search started"})
 }

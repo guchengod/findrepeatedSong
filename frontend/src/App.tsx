@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   Activity, Trash2,
@@ -159,6 +159,7 @@ function App() {
   const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [wsConnected, setWsConnected] = useState(false);
+  const realtimeRunning = useRef<Record<string, boolean>>({});
 
   // Progress States
   const [scanProgress, setScanProgress] = useState({ isRunning: false, scanned: 0, message: '' });
@@ -237,7 +238,9 @@ function App() {
   // WebSocket with reconnection
   useEffect(() => {
     let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:38491' : window.location.host;
+    // Production serves the UI and WebSocket from the same port. During local
+    // Vite development this also routes through the configured /ws proxy.
+    const host = window.location.host;
     const wsUrl = `${wsProtocol}//${host}/ws`;
     let ws: WebSocket;
     let reconnectTimeout: ReturnType<typeof setTimeout>;
@@ -261,11 +264,16 @@ function App() {
         try {
           const msg = JSON.parse(event.data);
           const { topic, data } = msg;
+          const didFinish = (name: string) => {
+            const wasRunning = realtimeRunning.current[name] === true;
+            realtimeRunning.current[name] = data.isRunning === true;
+            return wasRunning && data.isRunning === false;
+          };
 
           switch (topic) {
             case 'pipeline':
               setPipelineProgress(data);
-              if (!data.isRunning) loadGroups();
+              if (didFinish('pipeline')) loadGroups();
               break;
             case 'scan':
               setScanProgress(data);
@@ -287,11 +295,11 @@ function App() {
               if (data.detail) {
                 setLyricsLogs(prev => [data.detail, ...prev].slice(0, 100));
               }
-              if (!data.isRunning) loadLyrics();
+              if (didFinish('lyrics')) loadLyrics();
               break;
             case 'auto_delete':
               setAutoProgress(data);
-              if (!data.isRunning) loadGroups();
+              if (didFinish('auto_delete')) loadGroups();
               break;
           }
         } catch (e) {
