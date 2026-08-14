@@ -46,6 +46,15 @@ func addTask(task ScheduleTask) {
 
 		// Run task based on name
 		switch task.Name {
+		case "workflow":
+			workflow, ok := loadWorkflowDefault()
+			if !ok {
+				message := "尚未配置音乐工作流"
+				errMsg = &message
+				status = "FAILED"
+			} else {
+				runWorkflow(workflow)
+			}
 		case "organize":
 			var conf AppConfig
 			db.Where("key = ?", "target_path").First(&conf)

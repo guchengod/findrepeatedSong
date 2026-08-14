@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,30 +81,46 @@ func apiUpdateSchedule(c *gin.Context) {
 // --- Enhanced Actions ---
 func apiStartOrganize(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
-		Mode string `json:"mode"` // move, copy
+		Path  string   `json:"path"`
+		Paths []string `json:"paths"`
+		Mode  string   `json:"mode"` // move, copy
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Path) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	go doOrganize(req.Path, req.Mode)
+	if len(req.Paths) > 0 {
+		if err := validateAccessiblePaths(req.Paths); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	go doOrganize(req.Path, req.Mode, req.Paths...)
 	c.JSON(http.StatusOK, gin.H{"message": "Organization started"})
 }
 
 func apiStartComplete(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
+		Path  string   `json:"path"`
+		Paths []string `json:"paths"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	if req.Path == "" {
+	paths := req.Paths
+	if len(paths) == 0 && strings.TrimSpace(req.Path) != "" {
+		paths = []string{req.Path}
+	}
+	if len(paths) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
 		return
 	}
-	if !startManagedJob("complete", func() { doComplete(req.Path) }, func(err error) {
+	if err := validateAccessiblePaths(paths); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	if !startManagedJob("complete", func() { doCompletePaths(paths) }, func(err error) {
 		broadcastProgress("complete", gin.H{"isRunning": false, "status": err.Error()})
 	}) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Metadata completion is already running"})
@@ -114,37 +131,51 @@ func apiStartComplete(c *gin.Context) {
 
 func apiStartLyrics(c *gin.Context) {
 	var req struct {
-		Path string `json:"path"`
+		Path  string   `json:"path"`
+		Paths []string `json:"paths"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Path) == "" {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
 		return
 	}
-	path, err := filepath.Abs(req.Path)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+	paths := req.Paths
+	if len(paths) == 0 && strings.TrimSpace(req.Path) != "" {
+		paths = []string{req.Path}
+	}
+	if len(paths) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
 		return
 	}
-	allowed := false
-	for _, root := range configuredBrowseRoots() {
-		if pathWithinRoot(path, root.Path) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Path is not within an accessible music directory"})
+	if err := validateAccessiblePaths(paths); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
-	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Path must be a readable directory"})
-		return
-	}
-	if !startLyricsJob(path) {
+	if !startLyricsJob(paths...) {
 		c.JSON(http.StatusConflict, gin.H{"error": "A lyrics completion job is already running"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Lyrics completion started"})
+}
+
+func validateAccessiblePaths(paths []string) error {
+	roots := configuredBrowseRoots()
+	for _, candidate := range paths {
+		path, err := filepath.Abs(candidate)
+		if err != nil {
+			return fmt.Errorf("invalid path")
+		}
+		allowed := false
+		for _, root := range roots {
+			if pathWithinRoot(path, root.Path) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("path is not within an accessible music directory")
+		}
+	}
+	return nil
 }
 
 func apiGetLyrics(c *gin.Context) {
@@ -373,8 +404,15 @@ func configuredBrowseRoots() []browseRoot {
 	// browsing within mounted folders there, rather than exposing container paths.
 	if info, err := os.Stat("/music"); err == nil && info.IsDir() {
 		appendRoot("飞牛音乐目录", "/music")
-	} else {
-		appendRoot("本机文件系统", string(os.PathSeparator))
+	} else if configuredRoot := strings.TrimSpace(os.Getenv("FINDREPEATEDSONG_BROWSE_ROOT")); configuredRoot != "" {
+		// Desktop/Linux users can explicitly choose the only filesystem root the
+		// application is allowed to reveal. This keeps container mounts scoped.
+		appendRoot("已授权音乐目录", configuredRoot)
+	} else if homeDir, err := os.UserHomeDir(); err == nil {
+		// Never fall back to `/`: it exposes host/container paths unrelated to a
+		// music library. The user home is a practical desktop default until a
+		// dedicated music mount is configured.
+		appendRoot("本机音乐目录", homeDir)
 	}
 
 	for _, item := range []struct{ key, label string }{

@@ -1,34 +1,59 @@
-# Design QA — 2026-08-14
+# 工作流前端重构设计 QA
 
-## Comparison target
+## 比较对象
 
-- Source: `/Users/galvin/.codex/generated_images/019ffe0b-18ba-7ab1-ac15-bbdd49148fac/exec-17a4f31c-e720-4b10-8a82-40fa1ee03964.png` (1487 × 1058).
-- Implementation: `/tmp/findrepeatedsong-product-audit/redesign-desktop-final.jpg` (1440 × 1024), captured in the in-app browser at a 1440 × 1024 viewport.
-- Combined comparison: `/tmp/findrepeatedsong-product-audit/design-comparison.png` (source scaled to 1440 × 1024 above implementation). Both source and comparison were inspected visually.
+- Source visual truth: `/Users/galvin/.codex/generated_images/019ffe0b-18ba-7ab1-ac15-bbdd49148fac/exec-8932375f-7e66-446a-b667-f80bc88e670b.png`
+- Implementation screenshot: `/tmp/findrepeatedsong-manual-implementation.png`
+- Side-by-side evidence: `/tmp/findrepeatedsong-manual-comparison.png`
+- Source pixels: 1487 × 1058.
+- Implementation viewport: 1440 × 1024 CSS px; browser screenshot: 1425 × 1013 px.
+- State: 简体中文、浅色模式、手动操作页，选中 3 个目录条目。
 
-## Fidelity review
+## 验证过的交互
 
-| Surface | Result | Evidence / decision |
-| --- | --- | --- |
-| Typography | Pass | The display serif, Chinese-first hierarchy, small navigation text, and restrained metadata typography mirror the reference’s editorial tone. |
-| Layout and spacing | Pass | The fixed sidebar, 80 px top bar, prominent title, three-step rail, and two equal review panels follow the same composition and whitespace rhythm. |
-| Color and tokens | Pass | True-white base, deep navy text, cobalt primary actions, pale-blue active navigation, green connected state, and thin cool-gray rules are matched. |
-| Assets and icons | Pass | The existing Lucide icon library is used consistently for product controls; no raster or placeholder assets from the concept were replaced with CSS drawings. |
-| Copy and content | Pass | App-specific text is Chinese-first. Dynamic counts come from the local API instead of fabricated mock values. |
-| Responsive behavior | Pass | A 390 × 844 in-app-browser capture confirmed that the work rail stacks, the mobile navigation opens, and the duplicate-review header wraps without horizontal overflow. |
-| Core interactions | Pass | Workflow rail, desktop/mobile navigation, scan-review entry point, activity updates, duplicate search, and the safe-delete confirmation state are all interactive. |
+- 六项导航均可切换：概览、音乐工作流、手动操作、任务记录、自动化、设置。
+- 手动操作页会从受限目录接口读取当前目录；勾选三个条目后，底部动作栏显示“已选择 3 项”，四项处理动作由禁用变为可用。
+- 手动动作将完整的已选路径列表提交给后端：元数据补全、歌词下载、整理归档和手动重复扫描不再把请求扩大到未选项目。
+- 手动重复扫描使用非破坏性选中扫描，不会将库中未选记录标记为失效。
+- 目录访问优先使用飞牛 `/music` 挂载；非飞牛环境只允许显式授权目录或当前用户目录，取消了回退到 `/` 的行为。
+- 桌面与 390 × 844 窄屏下均验证无水平溢出；移动端菜单可打开并进入手动操作页。
+- 浏览器控制台无 warning/error；`npm run build` 与 `go test ./...` 均通过。
 
-## Material fixes during QA
+## Findings
 
-1. Added a Vite WebSocket proxy so the local connection state works when the frontend runs on its development port.
-2. Corrected the mobile duplicate-review action header so its controls wrap instead of clipping at a narrow viewport.
-3. Replaced irreversible duplicate deletion with an app-managed recycle bin and added restore/empty APIs.
+无 P0、P1 或 P2 问题。
 
-## Remaining intentional deviations
+### Required fidelity surfaces
 
-- The reference shows populated duplicate groups and activity history. The implementation deliberately displays live local data and a clear ready-state when no scan has produced groups yet.
-- The selected concept’s decorative app-mark treatment is represented with the project’s existing icon library so it stays sharp and theme-aware.
+- Fonts and typography: 页面标题继续使用 Noto Serif SC，导航、表格、动作栏使用一致的 Noto Sans SC 层级；窄屏标题与工具栏不发生重叠。
+- Spacing and layout rhythm: 264px 侧栏、80px 顶栏、开放主画布、目录工具栏、表格及固定动作栏与视觉稿保持同一节奏；大目录滚动限定在表格内，动作栏始终可见。
+- Colors and visual tokens: 白色背景、深海军蓝标题、皇家蓝主操作、浅蓝选中态、冷灰分割线和绿色连接状态均与设计稿对应。
+- Image quality and asset fidelity: 页面不含需要生成的栅格资产；图标使用项目已有的统一线性图标库。
+- Copy and content: 六项菜单、目录优先的手动操作、选择计数与“仅作用于已选项目”的安全说明均与产品定义一致。
 
-## Final result: passed
+## Comparison history
 
-No P0, P1, or P2 visual issues remain in the inspected desktop and mobile states. The implementation was compared against the selected design at the intended desktop viewport and is ready for handoff.
+1. 初次对照：真实目录条目很多，动作栏被推至首屏下方；修复为表格内部滚动和粘性表头。
+2. 复核：以选中三项状态再次与设计稿并排比较；侧栏、标题、目录表格、多选高亮与动作栏层级一致。真实文件名和挂载路径为运行数据差异，不属于视觉偏差。
+
+## Follow-up Polish
+
+- P3：在飞牛安装向导中可预填已挂载的媒体目录，避免首次启动时需要从用户目录进入音乐挂载点。
+
+## 工作流与自动化复核（2026-08-14）
+
+- 概览已移除“选择目录 / 音乐工作流 / 查看记录”三张跳转卡，改为曲目、重复组、可恢复空间和运行任务四项即时状态；首屏不再重复菜单导航。
+- 工作流内独立提供来源目录与归档目录选择，并为重复项、MusicBrainz 元数据、整理方式、歌词来源提供逐步配置；页面没有“另存为工作流”动作。
+- 启动工作流后会立即切换至任务记录；任务记录通过 WebSocket 显示步骤完成数，并在补全、整理、歌词等耗时步骤中显示已处理曲目计数，避免呈现为静止状态。
+- 自动化页按“定时执行 / 新增歌曲监控”分为两张清晰卡片。监控首次启用只建立基线，后续仅把新增音频文件交给已配置工作流。
+- 手动操作的上级目录在嵌套目录中实测可用：`…/music/dest` 返回至 `…/music`；根目录则保持禁用，符合受限挂载目录边界。
+- Browser visual check：自动化页面在 1265px 宽度下两张自动化卡片、工作流摘要和侧栏均无重叠或裁切。
+
+## 自动化工作流模型复核（2026-08-14）
+
+- 自动化改为可无限新增的任务列表，不再限制为一个定时任务和一个监控任务。
+- 每个任务将“定时 / 文件系统监控”触发条件、来源目录、归档目录、整理方式和四个工作流步骤保存为独立快照；编辑一个任务不会影响其他任务或手动工作流。
+- 新建监控的编辑器同时显示监控根目录与工作流来源目录，避免把“监听哪里”和“处理范围”混为同一概念。
+- 实测创建两条不同工作流（定时与监控）后，接口返回的步骤和归档模式各自保持独立；删除测试任务后列表恢复为空。
+
+final result: passed

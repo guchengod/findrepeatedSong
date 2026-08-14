@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-VERSION=${VERSION:-0.1.2}
+VERSION=${VERSION:-0.2.0}
 OUTPUT_DIR="$ROOT_DIR/dist/native"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/findrepeatedsong-native.XXXXXX")
 STATIC_DIR="$ROOT_DIR/backend/static"
@@ -51,7 +51,9 @@ build_desktop_package() {
     cp "$NATIVE_TEMPLATE/start.ps1" "$package_dir/start.ps1"
     (
       cd "$WORK_DIR"
-      zip -qr "$OUTPUT_DIR/${package_name}.zip" "$package_name"
+      # -FS removes assets from earlier builds, so a release archive cannot
+      # retain stale hashed frontend bundles when the filename is reused.
+      zip -qrFS "$OUTPUT_DIR/${package_name}.zip" "$package_name"
     )
     return
   fi

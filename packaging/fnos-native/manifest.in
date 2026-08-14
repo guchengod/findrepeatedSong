@@ -1,5 +1,5 @@
 appname=findrepeatedsong
-version=0.1.2
+version=0.2.0
 display_name=Music De-duplicator
 desc=音乐去重、整理与元数据补全工具（原生版）。
 source=thirdparty

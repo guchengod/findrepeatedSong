@@ -16,7 +16,7 @@ interface BrowseRoot {
 
 interface PathBrowserProps {
   value: string;
-  onChange: (path: string) => void;
+  onChange: (path: string) => void | Promise<void>;
 }
 
 const API_BASE = '/api';
@@ -29,6 +29,7 @@ export const PathBrowser: React.FC<PathBrowserProps> = ({ value, onChange }) => 
   const [roots, setRoots] = useState<BrowseRoot[]>([]);
   const [parent, setParent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
 
   const loadDir = async (dir = '') => {
@@ -113,8 +114,19 @@ export const PathBrowser: React.FC<PathBrowserProps> = ({ value, onChange }) => 
               <span>{currentPath || '请选择一个目录'}</span>
               <div>
                 <button type="button" className="path-browser-cancel" onClick={close}>{t('common.cancel')}</button>
-                <button type="button" className="path-browser-confirm" disabled={!currentPath || loading} onClick={() => { onChange(currentPath); close(); }}>
-                  {t('pathBrowser.select')}
+                <button type="button" className="path-browser-confirm" disabled={!currentPath || loading || confirming} onClick={async () => {
+                  setConfirming(true);
+                  try {
+                    await onChange(currentPath);
+                    close();
+                  } catch (requestError: unknown) {
+                    const err = requestError as { response?: { data?: { error?: string } } };
+                    setError(err.response?.data?.error || '保存目录失败，请重试');
+                  } finally {
+                    setConfirming(false);
+                  }
+                }}>
+                  {confirming ? '保存中…' : t('pathBrowser.select')}
                 </button>
               </div>
             </footer>

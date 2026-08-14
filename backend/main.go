@@ -34,7 +34,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{}, &TrashRecord{}, &LyricsRecord{})
+	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{}, &AutomationTask{}, &TrashRecord{}, &LyricsRecord{})
 
 	// Seed default data
 	seedData()
@@ -44,6 +44,8 @@ func main() {
 
 	// Initialize Scheduler
 	initScheduler()
+	initWorkflowMonitor()
+	initAutomationTasks()
 	go hub.run()
 
 	r := gin.Default()
@@ -59,6 +61,12 @@ func main() {
 		api.POST("/delete-file", apiDeleteFile)
 		api.POST("/auto-delete", apiAutoDelete)
 		api.POST("/full-pipeline", apiFullPipeline)
+		api.POST("/manual-scan", apiManualScan)
+		api.POST("/workflow/run", apiRunWorkflow)
+		api.GET("/workflow/config", apiGetWorkflowConfig)
+		api.POST("/workflow/config", apiUpdateWorkflowConfig)
+		api.GET("/workflow/monitor", apiGetWorkflowMonitor)
+		api.POST("/workflow/monitor", apiUpdateWorkflowMonitor)
 		api.GET("/trash", apiGetTrash)
 		api.POST("/trash/restore", apiRestoreTrash)
 		api.POST("/trash/empty", apiEmptyTrash)
@@ -74,6 +82,9 @@ func main() {
 		// Schedules
 		api.GET("/schedules", apiGetSchedules)
 		api.POST("/schedules", apiUpdateSchedule)
+		api.GET("/automations", apiGetAutomationTasks)
+		api.POST("/automations", apiSaveAutomationTask)
+		api.DELETE("/automations/:id", apiDeleteAutomationTask)
 
 		// Config
 		api.GET("/config", apiGetConfig)
@@ -125,6 +136,7 @@ func seedData() {
 	}
 
 	tasks := []ScheduleTask{
+		{Name: "workflow", Cron: "0 2 * * *", IsActive: false},
 		{Name: "organize", Cron: "0 2 * * *", IsActive: false},
 		{Name: "complete", Cron: "0 3 * * *", IsActive: false},
 	}

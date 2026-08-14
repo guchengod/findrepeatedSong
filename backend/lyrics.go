@@ -42,7 +42,7 @@ type lyricTrack struct {
 	Duration float64
 }
 
-func startLyricsJob(path string) bool {
+func startLyricsJob(paths ...string) bool {
 	lyricsJobMu.Lock()
 	defer lyricsJobMu.Unlock()
 	if lyricsActive {
@@ -55,7 +55,7 @@ func startLyricsJob(path string) bool {
 			lyricsActive = false
 			lyricsJobMu.Unlock()
 		}()
-		doLyrics(path)
+		doLyricsPaths(paths)
 	}()
 	return true
 }
@@ -68,21 +68,46 @@ func lyricConfig(key, fallback string) string {
 	return fallback
 }
 
-func collectLyricTracks(rootPath string) []lyricTrack {
+func collectLyricTracks(paths []string) []lyricTrack {
 	tracks := make([]lyricTrack, 0)
-	filepath.WalkDir(rootPath, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry == nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			return nil
+	seen := make(map[string]struct{})
+	addTrack := func(path string, entry os.DirEntry) {
+		if entry == nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !validExts[strings.ToLower(filepath.Ext(entry.Name()))] {
+			return
 		}
-		if !validExts[strings.ToLower(filepath.Ext(entry.Name()))] {
-			return nil
+		if _, exists := seen[path]; exists {
+			return
 		}
+		seen[path] = struct{}{}
 		artist, album, title, duration := extractMetadata(path)
 		tracks = append(tracks, lyricTrack{Path: path, Filename: entry.Name(), Artist: artist, Album: album, Title: title, Duration: duration})
-		return nil
-	})
+	}
+	for _, rootPath := range paths {
+		info, err := os.Stat(rootPath)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			addTrack(rootPath, fileInfoDirEntry{info: info})
+			continue
+		}
+		filepath.WalkDir(rootPath, func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry == nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			addTrack(path, entry)
+			return nil
+		})
+	}
 	return tracks
 }
+
+type fileInfoDirEntry struct{ info os.FileInfo }
+
+func (entry fileInfoDirEntry) Name() string               { return entry.info.Name() }
+func (entry fileInfoDirEntry) IsDir() bool                { return entry.info.IsDir() }
+func (entry fileInfoDirEntry) Type() os.FileMode          { return entry.info.Mode().Type() }
+func (entry fileInfoDirEntry) Info() (os.FileInfo, error) { return entry.info, nil }
 
 func hasLocalLyrics(trackPath string) bool {
 	base := strings.TrimSuffix(trackPath, filepath.Ext(trackPath))
@@ -219,7 +244,11 @@ func saveLyricsRecord(track lyricTrack, lyricsPath, status, message string, sync
 }
 
 func doLyrics(rootPath string) {
-	tracks := collectLyricTracks(rootPath)
+	doLyricsPaths([]string{rootPath})
+}
+
+func doLyricsPaths(paths []string) {
+	tracks := collectLyricTracks(paths)
 	broadcastProgress("lyrics", gin.H{"isRunning": true, "processed": 0, "total": len(tracks), "status": "正在检查本地歌词…"})
 	defer broadcastProgress("lyrics", gin.H{"isRunning": false, "processed": len(tracks), "total": len(tracks), "status": "歌词补全完成"})
 

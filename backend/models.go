@@ -73,6 +73,23 @@ type ScheduleTask struct {
 	RunHistory string    `json:"runHistory"` // JSON array of RunRecord, max 10 entries
 }
 
+// AutomationTask owns both its trigger and its workflow definition. This lets
+// a library have any number of independent schedules and directory watchers
+// without them accidentally sharing mutable global workflow settings.
+type AutomationTask struct {
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	Name         string    `json:"name"`
+	Kind         string    `json:"kind" gorm:"index"` // schedule | monitor
+	Cron         string    `json:"cron"`
+	RootPath     string    `json:"rootPath"`
+	IsActive     bool      `json:"isActive" gorm:"index"`
+	WorkflowJSON string    `json:"-"`
+	LastRun      time.Time `json:"lastRun"`
+	RunHistory   string    `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 // AddRunRecord appends a new RunRecord to history, trimming to max 10 entries.
 func (t *ScheduleTask) AddRunRecord(rec RunRecord) {
 	var history []RunRecord

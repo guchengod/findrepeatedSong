@@ -2,13 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import {
   CheckCircle2,
-  ChevronRight,
   FolderOpen,
   History,
   Library,
   Music2,
   RefreshCw,
-  Search,
   Tags,
   Trash2,
 } from 'lucide-react';
@@ -35,8 +33,6 @@ export interface ActivityItem {
   timestamp: string;
 }
 
-type Destination = 'deduper' | 'organizer' | 'completer';
-
 const formatBytes = (bytes: number) => {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -50,11 +46,9 @@ const formatBytes = (bytes: number) => {
 };
 
 export const Dashboard = ({
-  onNavigate,
   activity,
   connected,
 }: {
-  onNavigate: (destination: Destination) => void;
   activity: ActivityItem[];
   connected: boolean;
 }) => {
@@ -77,13 +71,8 @@ export const Dashboard = ({
   }, []);
 
   const recoverable = useMemo(() => trash.reduce((sum, item) => sum + item.size, 0), [trash]);
-  const steps = [
-    { number: '1', label: '扫描重复项', detail: '查找完全或相似重复的音频文件', icon: Search, destination: 'deduper' as const },
-    { number: '2', label: '整理目录', detail: '规范文件夹结构与命名规则', icon: FolderOpen, destination: 'organizer' as const },
-    { number: '3', label: '补全元数据', detail: '修复缺失或不完整的标签信息', icon: Tags, destination: 'completer' as const },
-  ];
   const iconFor = {
-    scan: Search,
+    scan: Library,
     duplicate: Library,
     organize: FolderOpen,
     metadata: Tags,
@@ -94,30 +83,21 @@ export const Dashboard = ({
   return (
     <section className="library-dashboard">
       <div className="library-hero">
-        <h1>让音乐库保持整洁</h1>
-        <p>扫描重复、整理目录、补全元数据，让你的音乐库井然有序。</p>
+        <h1>音乐库概览</h1>
+        <p>本地音乐库的状态、待处理事项和最近执行结果。</p>
       </div>
 
-      <div className="workflow-rail" aria-label="音乐库工作流">
-        {steps.map((step, index) => {
-          const Icon = step.icon;
-          return (
-            <button className="workflow-step" key={step.number} onClick={() => onNavigate(step.destination)}>
-              <span className="workflow-index">{step.number}</span>
-              <span className="workflow-icon"><Icon size={31} strokeWidth={1.7} /></span>
-              <span className="workflow-copy"><strong>{step.label}</strong><small>{step.detail}</small></span>
-              <ChevronRight size={21} className="workflow-arrow" />
-              {index < steps.length - 1 && <span className="workflow-connector" />}
-            </button>
-          );
-        })}
+      <div className="overview-metrics" aria-label="音乐库状态">
+        <div><Music2 size={19} /><span>已收录曲目</span><strong>{stats?.total_songs ?? '—'}</strong></div>
+        <div><Library size={19} /><span>待处理重复组</span><strong>{stats?.total_duplicates ?? '—'}</strong></div>
+        <div><Trash2 size={19} /><span>可恢复空间</span><strong>{formatBytes(recoverable)}</strong></div>
+        <div><RefreshCw size={19} /><span>运行中的任务</span><strong>{stats?.jobs_running ?? '—'}</strong></div>
       </div>
 
       <div className="dashboard-columns">
         <section className="activity-panel">
           <div className="panel-heading">
             <h2>最近活动</h2>
-            <button className="text-action" onClick={() => onNavigate('deduper')}>查看全部</button>
           </div>
           <div className="activity-list">
             {activity.length === 0 ? (
@@ -142,17 +122,16 @@ export const Dashboard = ({
         <section className="duplicate-panel">
           <div className="panel-heading">
             <div><h2>待处理重复组</h2><span className="count-chip">{stats?.total_duplicates ?? 0} 组</span></div>
-            <button className="text-action" onClick={() => onNavigate('deduper')}>查看全部</button>
           </div>
           <div className="duplicate-summary">
             <span>待审核重复文件占用空间（估算）</span>
             <strong>{stats ? `${stats.storage_used_gb.toFixed(2)} GB` : '—'}</strong>
-            <button className="primary-action" onClick={() => onNavigate('deduper')}><Search size={17} />开始审核</button>
+            <em>在“手动操作”中选择音乐后，可单独扫描和审核重复项。</em>
           </div>
-          <div className="duplicate-table-labels"><span>音乐库状态</span><span>歌曲数量</span><span>处理建议</span></div>
-          <div className="duplicate-table-row"><span><Music2 size={17} />已收录曲目</span><b>{stats?.total_songs ?? '—'}</b><button onClick={() => onNavigate('deduper')}>查看重复项 <ChevronRight size={15} /></button></div>
-          <div className="duplicate-table-row"><span><History size={17} />回收站保护</span><b>{trash.length} 项</b><button onClick={refresh}>刷新状态 <RefreshCw size={14} /></button></div>
-          <div className="duplicate-table-row"><span><Trash2 size={17} />可恢复空间</span><b>{formatBytes(recoverable)}</b><button onClick={() => onNavigate('deduper')}>管理回收站 <ChevronRight size={15} /></button></div>
+          <div className="duplicate-table-labels"><span>本地保护状态</span><span>数量</span></div>
+          <div className="duplicate-table-row"><span><History size={17} />回收站中的文件</span><b>{trash.length} 项</b></div>
+          <div className="duplicate-table-row"><span><Trash2 size={17} />可恢复空间</span><b>{formatBytes(recoverable)}</b></div>
+          <button className="overview-refresh" onClick={refresh}><RefreshCw size={14} />刷新概览</button>
         </section>
       </div>
 

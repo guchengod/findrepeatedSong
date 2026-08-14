@@ -93,14 +93,20 @@ func extractFromFilename(filename string) (artist, title string) {
 
 func extractMetadata(path string) (artist, album, title string, duration float64) {
 	filename := filepath.Base(path)
-	
+
 	tags, _ := taglib.ReadTags(path)
 	props, _ := taglib.ReadProperties(path)
 
 	if tags != nil {
-		if v, ok := tags["ARTIST"]; ok && len(v) > 0 { artist = v[0] }
-		if v, ok := tags["ALBUM"]; ok && len(v) > 0 { album = v[0] }
-		if v, ok := tags["TITLE"]; ok && len(v) > 0 { title = v[0] }
+		if v, ok := tags["ARTIST"]; ok && len(v) > 0 {
+			artist = v[0]
+		}
+		if v, ok := tags["ALBUM"]; ok && len(v) > 0 {
+			album = v[0]
+		}
+		if v, ok := tags["TITLE"]; ok && len(v) > 0 {
+			title = v[0]
+		}
 	}
 	duration = props.Length.Seconds()
 
@@ -137,21 +143,34 @@ func normalizeName(name string) string {
 	ext := filepath.Ext(name)
 	nameWithoutExt := strings.TrimSuffix(name, ext)
 	nameWithoutExt = strings.ToLower(nameWithoutExt)
-	
+
 	// Remove common tags
 	tags := []string{"320k", "official", "audio", "high", "res", "remastered", "live", "edit"}
 	for _, t := range tags {
 		nameWithoutExt = strings.ReplaceAll(nameWithoutExt, t, "")
 	}
-	
+
 	cleaned := cleanRe.ReplaceAllString(nameWithoutExt, "")
 	return cleaned
 }
 
 func doScan(rootPaths []string) {
+	doScanWithReset(rootPaths, true)
+}
+
+// doScanSelection updates records for only the files explicitly selected by the
+// user. Unlike a library-wide scan, it never marks unrelated records deleted.
+func doScanSelection(rootPaths []string) {
+	doScanWithReset(rootPaths, false)
+}
+
+func doScanWithReset(rootPaths []string, resetExisting bool) {
 	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": 0, "status": "Cleaning old records..."})
-	// Mark all existing records as deleted before scan
-	db.Model(&SongFile{}).Where("1=1").Update("deleted", true)
+	if resetExisting {
+		// A full library scan is authoritative; selected scans deliberately do
+		// not touch records outside the selected paths.
+		db.Model(&SongFile{}).Where("1=1").Update("deleted", true)
+	}
 
 	broadcastProgress("scan", gin.H{"isRunning": true, "scanned": 0, "status": "Starting scan..."})
 	defer broadcastProgress("scan", gin.H{"isRunning": false, "status": "Scan finished"})
@@ -168,9 +187,43 @@ func doScan(rootPaths []string) {
 		}
 	}
 
+	processFile := func(fullPath string, info os.FileInfo) {
+		ext := strings.ToLower(filepath.Ext(fullPath))
+		if !validExts[ext] {
+			return
+		}
+		normalized := normalizeName(filepath.Base(fullPath))
+		if normalized == "" {
+			return
+		}
+		artist, album, title, duration := extractMetadata(fullPath)
+		batch = append(batch, SongFile{
+			Path: fullPath, Filename: filepath.Base(fullPath), Artist: artist, Album: album, Title: title,
+			NormalizedName: normalized, Duration: duration, Size: info.Size(), Ext: ext,
+		})
+		scanned++
+		if scanned%100 == 0 {
+			broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scanning..."})
+		}
+		if len(batch) >= batchSize {
+			saveBatch(batch)
+			batch = batch[:0]
+		}
+	}
+
 	for _, rootPath := range rootPaths {
-		if rootPath == "" { continue }
-		
+		if rootPath == "" {
+			continue
+		}
+		info, err := os.Stat(rootPath)
+		if err != nil {
+			log.Println("Stat error:", err)
+			continue
+		}
+		if !info.IsDir() {
+			processFile(rootPath, info)
+			continue
+		}
 		var walk func(path string, depth int)
 		walk = func(path string, depth int) {
 			if depth > maxDepth {
@@ -189,45 +242,11 @@ func doScan(rootPaths []string) {
 					continue
 				}
 
-				ext := strings.ToLower(filepath.Ext(entry.Name()))
-				if !validExts[ext] {
-					continue
-				}
-
 				info, err := entry.Info()
 				if err != nil {
 					continue
 				}
-
-				normalized := normalizeName(entry.Name())
-				if normalized == "" {
-					continue // Skip if name is completely empty after clean
-				}
-
-				artist, album, title, duration := extractMetadata(fullPath)
-
-				file := SongFile{
-					Path:           fullPath,
-					Filename:       entry.Name(),
-					Artist:         artist,
-					Album:          album,
-					Title:          title,
-					NormalizedName: normalized,
-					Duration:       duration,
-					Size:           info.Size(),
-					Ext:            ext,
-				}
-				batch = append(batch, file)
-
-				scanned++
-				if scanned%100 == 0 {
-					broadcastProgress("scan", gin.H{"isRunning": true, "scanned": scanned, "status": "Scanning..."})
-				}
-
-				if len(batch) >= batchSize {
-					saveBatch(batch)
-					batch = batch[:0]
-				}
+				processFile(fullPath, info)
 			}
 		}
 
@@ -272,4 +291,3 @@ func saveBatch(batch []SongFile) {
 		DoUpdates: clause.AssignmentColumns([]string{"filename", "artist", "album", "title", "normalized_name", "duration", "size", "ext", "deleted"}),
 	}).Create(&batch)
 }
-

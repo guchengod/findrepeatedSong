@@ -14,7 +14,7 @@ var (
 	lrcExts = []string{".lrc", ".txt", ".srt", ".ass", ".vtt"}
 )
 
-func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
+func doOrganize(targetRoot string, mode string, selectedPaths ...string) { // mode: "move" or "copy"
 	broadcastProgress("organize", gin.H{"isRunning": true, "processed": 0, "total": 0, "status": "Initializing..."})
 	defer func() {
 		broadcastProgress("organize", gin.H{"isRunning": false, "status": "Done"})
@@ -25,6 +25,23 @@ func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
 	if err := db.Where("deleted = ?", false).Find(&songs).Error; err != nil {
 		log.Println("Error fetching songs for organization:", err)
 		return
+	}
+	if len(selectedPaths) > 0 {
+		selected := make(map[string]struct{}, len(selectedPaths))
+		for _, path := range selectedPaths {
+			selected[filepath.Clean(path)] = struct{}{}
+		}
+		filtered := make([]SongFile, 0, len(songs))
+		for _, song := range songs {
+			cleanSongPath := filepath.Clean(song.Path)
+			for selectedPath := range selected {
+				if cleanSongPath == selectedPath || strings.HasPrefix(cleanSongPath, selectedPath+string(os.PathSeparator)) {
+					filtered = append(filtered, song)
+					break
+				}
+			}
+		}
+		songs = filtered
 	}
 
 	total := len(songs)
@@ -39,13 +56,13 @@ func doOrganize(targetRoot string, mode string) { // mode: "move" or "copy"
 		// Sanitize paths
 		artist := sanitizeFolderName(song.Artist)
 		album := sanitizeFolderName(song.Album)
-		
+
 		targetDir := filepath.Join(targetRoot, artist, album)
 		os.MkdirAll(targetDir, 0755)
 
 		oldPath := song.Path
 		newSongPath := filepath.Join(targetDir, song.Filename)
-		
+
 		if mode == "move" {
 			if err := moveFile(oldPath, newSongPath); err != nil {
 				continue

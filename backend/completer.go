@@ -284,6 +284,10 @@ func doMBSearch(artist, title string) (MBRecordingResponse, error) {
 }
 
 func doComplete(rootPath string) {
+	doCompletePaths([]string{rootPath})
+}
+
+func doCompletePaths(paths []string) {
 	broadcastProgress("complete", gin.H{"isRunning": true, "processed": 0, "total": 0, "status": "Starting scan..."})
 	defer func() {
 		broadcastProgress("complete", gin.H{"isRunning": false, "status": "Done"})
@@ -291,67 +295,74 @@ func doComplete(rootPath string) {
 	}()
 
 	processed := 0
-
-	var walk func(path string)
-	walk = func(path string) {
-		entries, err := os.ReadDir(path)
+	files := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, selectedPath := range paths {
+		info, err := os.Stat(selectedPath)
 		if err != nil {
-			log.Println("ReadDir error:", err)
-			return
+			log.Println("Stat error:", err)
+			continue
 		}
-
-		for _, entry := range entries {
-			fullPath := filepath.Join(path, entry.Name())
-			if entry.IsDir() {
-				walk(fullPath)
-				continue
-			}
-
-			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if !validExts[ext] {
-				continue
-			}
-
-			// It's a valid music file. Extract local duration.
-			_, _, _, duration := extractMetadata(fullPath)
-
-			// Get candidate titles from filename
-			candidates := getCandidateTitles(entry.Name())
-
-			na, nal, nt, err := searchMetadata(candidates, duration)
-			detailMsg := ""
-
-			if err != nil {
-				detailMsg = fmt.Sprintf("❌ [%s] 失败: %v", entry.Name(), err)
-			} else if nt == "" {
-				detailMsg = fmt.Sprintf("⚠️ [%s] 未找到匹配 (候选: %v)", entry.Name(), candidates)
-			} else {
-				// 1. Update database
-				var song SongFile
-				if err := db.Where("path = ?", fullPath).First(&song).Error; err == nil {
-					song.Artist = na
-					song.Album = nal
-					song.Title = nt
-					db.Save(&song)
+		if info.IsDir() {
+			_ = filepath.WalkDir(selectedPath, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr == nil && entry != nil && !entry.IsDir() && validExts[strings.ToLower(filepath.Ext(entry.Name()))] {
+					if _, exists := seen[path]; !exists {
+						seen[path] = struct{}{}
+						files = append(files, path)
+					}
 				}
-				// 2. Update physical file
-				if err := writeMetadataToFile(fullPath, na, nal, nt); err != nil {
-					detailMsg = fmt.Sprintf("✅ [%s] DB更新 -> %s - %s (文件写入失败: %v)", entry.Name(), na, nt, err)
-				} else {
-					detailMsg = fmt.Sprintf("✅ [%s] 成功更新文件 & DB -> %s - %s", entry.Name(), na, nt)
-				}
-			}
-
-			processed++
-			broadcastProgress("complete", gin.H{
-				"isRunning": true,
-				"processed": processed,
-				"total":     0,
-				"status":    "Completing metadata...",
-				"detail":    detailMsg,
+				return nil
 			})
+			continue
+		}
+		if validExts[strings.ToLower(filepath.Ext(selectedPath))] {
+			if _, exists := seen[selectedPath]; !exists {
+				seen[selectedPath] = struct{}{}
+				files = append(files, selectedPath)
+			}
 		}
 	}
 
-	walk(rootPath)
+	for _, fullPath := range files {
+		entryName := filepath.Base(fullPath)
+
+		// It's a valid music file. Extract local duration.
+		_, _, _, duration := extractMetadata(fullPath)
+
+		// Get candidate titles from filename
+		candidates := getCandidateTitles(entryName)
+
+		na, nal, nt, err := searchMetadata(candidates, duration)
+		detailMsg := ""
+
+		if err != nil {
+			detailMsg = fmt.Sprintf("❌ [%s] 失败: %v", entryName, err)
+		} else if nt == "" {
+			detailMsg = fmt.Sprintf("⚠️ [%s] 未找到匹配 (候选: %v)", entryName, candidates)
+		} else {
+			// 1. Update database
+			var song SongFile
+			if err := db.Where("path = ?", fullPath).First(&song).Error; err == nil {
+				song.Artist = na
+				song.Album = nal
+				song.Title = nt
+				db.Save(&song)
+			}
+			// 2. Update physical file
+			if err := writeMetadataToFile(fullPath, na, nal, nt); err != nil {
+				detailMsg = fmt.Sprintf("✅ [%s] DB更新 -> %s - %s (文件写入失败: %v)", entryName, na, nt, err)
+			} else {
+				detailMsg = fmt.Sprintf("✅ [%s] 成功更新文件 & DB -> %s - %s", entryName, na, nt)
+			}
+		}
+
+		processed++
+		broadcastProgress("complete", gin.H{
+			"isRunning": true,
+			"processed": processed,
+			"total":     0,
+			"status":    "Completing metadata...",
+			"detail":    detailMsg,
+		})
+	}
 }

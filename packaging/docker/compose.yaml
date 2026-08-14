@@ -1,6 +1,6 @@
 services:
   music-deduper:
-    image: ${FINDREPEATEDSONG_IMAGE:-findrepeatedsong:0.1.2}
+    image: ${FINDREPEATEDSONG_IMAGE:-findrepeatedsong:0.2.0}
     container_name: findrepeatedsong
     restart: unless-stopped
     ports:
