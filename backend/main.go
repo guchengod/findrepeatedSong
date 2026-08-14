@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -15,8 +16,14 @@ var db *gorm.DB
 
 func main() {
 	var err error
-	os.MkdirAll("data", 0755)
-	db, err = gorm.Open(sqlite.Open("data/songs.db"), &gorm.Config{
+	dataDir := envOrDefault("FINDREPEATEDSONG_DATA_DIR", "data")
+	staticDir := envOrDefault("FINDREPEATEDSONG_STATIC_DIR", "static")
+	port := envOrDefault("FINDREPEATEDSONG_PORT", "8080")
+
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatal(err)
+	}
+	db, err = gorm.Open(sqlite.Open(filepath.Join(dataDir, "songs.db")), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -51,7 +58,7 @@ func main() {
 
 		// Organizer
 		api.POST("/organize", apiStartOrganize)
-		
+
 		// Completer
 		api.POST("/complete", apiStartComplete)
 
@@ -74,16 +81,23 @@ func main() {
 
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
-		fpath := "static" + path
+		fpath := filepath.Join(staticDir, path)
 		if _, err := os.Stat(fpath); err == nil && !os.IsPathSeparator(path[len(path)-1]) {
 			c.File(fpath)
 			return
 		}
-		c.File("static/index.html")
+		c.File(filepath.Join(staticDir, "index.html"))
 	})
 
-	log.Println("Server starting on :8080")
-	r.Run(":8080")
+	log.Printf("Server starting on :%s", port)
+	r.Run(":" + port)
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func seedData() {

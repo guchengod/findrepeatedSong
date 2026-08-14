@@ -1,0 +1,69 @@
+#!/bin/bash
+
+APP_DIR="${TRIM_APPDEST}/server"
+DATA_DIR="${TRIM_PKGVAR}/data"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+is_running() {
+  if [ ! -f "$PID_FILE" ]; then
+    return 1
+  fi
+
+  local pid
+  pid=$(tr -d '[:space:]' < "$PID_FILE")
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+start_app() {
+  if is_running; then
+    return 0
+  fi
+
+  mkdir -p "$DATA_DIR"
+  FINDREPEATEDSONG_DATA_DIR="$DATA_DIR" \
+    FINDREPEATEDSONG_STATIC_DIR="${APP_DIR}/static" \
+    FINDREPEATEDSONG_PORT="8080" \
+    "$APP_DIR/findrepeatedsong" >> "$LOG_FILE" 2>&1 &
+  echo "$!" > "$PID_FILE"
+}
+
+stop_app() {
+  if ! is_running; then
+    return 0
+  fi
+
+  local pid
+  pid=$(tr -d '[:space:]' < "$PID_FILE")
+  kill -TERM "$pid" 2>/dev/null || true
+
+  local count=0
+  while kill -0 "$pid" 2>/dev/null && [ "$count" -lt 10 ]; do
+    sleep 1
+    count=$((count + 1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+}
+
+case "$1" in
+  start)
+    start_app
+    ;;
+  stop)
+    stop_app
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Unknown action: $1" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+    ;;
+esac
