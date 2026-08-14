@@ -36,15 +36,18 @@ export const PathBrowser: React.FC<PathBrowserProps> = ({ value, onChange }) => 
     setLoading(true);
     setError('');
     try {
-      const response = await axios.get(`${API_BASE}/browse-path`, { params: { dir } });
+      const response = await axios.get(`${API_BASE}/browse-path`, { params: { dir }, timeout: 15_000 });
       setEntries(response.data.entries || []);
       setRoots(response.data.roots || []);
       setParent(response.data.parent || '');
       setCurrentPath(response.data.path || dir);
     } catch (requestError: unknown) {
-      const err = requestError as { response?: { data?: { error?: string } } };
+      const err = requestError as { response?: { data?: { error?: string; roots?: BrowseRoot[] } } };
       setError(err.response?.data?.error || '无法读取目录');
       setEntries([]);
+      setRoots(err.response?.data?.roots || []);
+      setParent('');
+      setCurrentPath(dir);
     } finally {
       setLoading(false);
     }
@@ -86,7 +89,7 @@ export const PathBrowser: React.FC<PathBrowserProps> = ({ value, onChange }) => 
 
             <div className="path-browser-location" title={currentPath}>
               <FolderOpen size={16} />
-              <span>{currentPath || '正在载入目录…'}</span>
+              <span>{currentPath || (loading ? '正在载入目录…' : error ? '目录不可用' : '请选择一个目录')}</span>
             </div>
 
             {error && <p className="path-browser-error">{error}</p>}
@@ -105,13 +108,13 @@ export const PathBrowser: React.FC<PathBrowserProps> = ({ value, onChange }) => 
                   {entries.filter(entry => !entry.isDir).map(entry => (
                     <div className="path-browser-entry is-file" key={entry.path}><File size={16} /><span>{entry.name}</span></div>
                   ))}
-                  {entries.length === 0 && <div className="path-browser-empty">{t('pathBrowser.empty')}</div>}
+                  {!error && entries.length === 0 && <div className="path-browser-empty">{t('pathBrowser.empty')}</div>}
                 </>
               )}
             </div>
 
             <footer className="path-browser-footer">
-              <span>{currentPath || '请选择一个目录'}</span>
+              <span>{currentPath || (error ? '请先修复目录授权' : '请选择一个目录')}</span>
               <div>
                 <button type="button" className="path-browser-cancel" onClick={close}>{t('common.cancel')}</button>
                 <button type="button" className="path-browser-confirm" disabled={!currentPath || loading || confirming} onClick={async () => {

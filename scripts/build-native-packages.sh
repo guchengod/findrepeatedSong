@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-VERSION=${VERSION:-0.2.0}
+VERSION=${VERSION:-0.2.1}
 OUTPUT_DIR="$ROOT_DIR/dist/native"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/findrepeatedsong-native.XXXXXX")
 STATIC_DIR="$ROOT_DIR/backend/static"

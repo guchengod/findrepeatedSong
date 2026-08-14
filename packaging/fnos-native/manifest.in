@@ -1,5 +1,5 @@
 appname=findrepeatedsong
-version=0.2.0
+version=0.2.1
 display_name=Music De-duplicator
 desc=音乐去重、整理与元数据补全工具（原生版）。
 source=thirdparty
@@ -14,4 +14,4 @@ service_port=38491
 checkport=true
 ctl_stop=true
 disable_authorization_path=false
-changelog=首次发布飞牛 fnOS 原生安装包，支持音乐库去重、整理与元数据补全。
+changelog=修复飞牛目录授权：应用仅使用系统“授权目录”授予的路径，目录选择失败不再无限加载。

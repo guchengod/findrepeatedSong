@@ -1,6 +1,6 @@
 services:
   music-deduper:
-    image: ghcr.io/guchengod/findrepeatedsong:${FINDREPEATEDSONG_VERSION:-0.2.0}
+    image: ghcr.io/guchengod/findrepeatedsong:${FINDREPEATEDSONG_VERSION:-0.2.1}
     container_name: findrepeatedsong
     restart: unless-stopped
     ports:
@@ -8,3 +8,5 @@ services:
     volumes:
       - "${TRIM_PKGVAR}/data:/app/data"
       - "${wizard_music_path}:/music:rw"
+    environment:
+      FINDREPEATEDSONG_BROWSE_ROOT: /music

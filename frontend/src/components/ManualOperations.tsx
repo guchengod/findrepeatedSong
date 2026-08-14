@@ -69,7 +69,7 @@ export const ManualOperations = ({
     setLoading(true);
     setError('');
     try {
-      const { data } = await axios.get<BrowseResponse>(`${API_BASE}/browse-path`, { params: { dir: path } });
+      const { data } = await axios.get<BrowseResponse>(`${API_BASE}/browse-path`, { params: { dir: path }, timeout: 15_000 });
       setCurrentPath(data.path);
       setParentPath(data.parent);
       setEntries(data.entries || []);
@@ -77,6 +77,8 @@ export const ManualOperations = ({
     } catch (requestError: unknown) {
       const err = requestError as { response?: { data?: { error?: string } } };
       setEntries([]);
+      setParentPath('');
+      setCurrentPath(path);
       setError(err.response?.data?.error || '无法读取目录，请确认飞牛挂载目录和应用权限。');
     } finally {
       setLoading(false);
@@ -118,7 +120,7 @@ export const ManualOperations = ({
       <div className="manual-toolbar">
         <div className="manual-breadcrumb" title={currentPath}>
           <FolderOpen size={21} />
-          <span>{currentPath || '正在读取目录…'}</span>
+          <span>{currentPath || (loading ? '正在读取目录…' : error ? '目录不可用' : '请选择一个目录')}</span>
         </div>
         <div className="manual-tools">
           <PathBrowser value={currentPath} onChange={async (path) => { await loadDirectory(path); }} />

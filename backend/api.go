@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -380,7 +381,7 @@ func pathWithinRoot(path, root string) bool {
 }
 
 func configuredBrowseRoots() []browseRoot {
-	roots := make([]browseRoot, 0, 3)
+	roots := make([]browseRoot, 0, 6)
 	appendRoot := func(label, path string) {
 		if strings.TrimSpace(path) == "" {
 			return
@@ -392,6 +393,15 @@ func configuredBrowseRoots() []browseRoot {
 		if info, err := os.Stat(absolute); err != nil || !info.IsDir() {
 			return
 		}
+		directory, err := os.Open(absolute)
+		if err != nil {
+			return
+		}
+		_, readErr := directory.Readdirnames(1)
+		_ = directory.Close()
+		if readErr != nil && readErr != io.EOF {
+			return
+		}
 		for _, root := range roots {
 			if root.Path == absolute {
 				return
@@ -400,19 +410,27 @@ func configuredBrowseRoots() []browseRoot {
 		roots = append(roots, browseRoot{Label: label, Path: absolute})
 	}
 
-	// fnOS packages mount the folder chosen in the install wizard at /music. Keep
-	// browsing within mounted folders there, rather than exposing container paths.
-	if info, err := os.Stat("/music"); err == nil && info.IsDir() {
-		appendRoot("飞牛音乐目录", "/music")
-	} else if configuredRoot := strings.TrimSpace(os.Getenv("FINDREPEATEDSONG_BROWSE_ROOT")); configuredRoot != "" {
-		// Desktop/Linux users can explicitly choose the only filesystem root the
-		// application is allowed to reveal. This keeps container mounts scoped.
+	// The Docker edition receives its selected directory as /music. The native
+	// fnOS edition receives only the paths explicitly authorised by the user in
+	// its application settings through TRIM_DATA_ACCESSIBLE_PATHS. Never infer
+	// that /vol1 (or any other volume) is accessible: the package user is blocked
+	// by fnOS ACLs until the system grants that directory.
+	appendRoot("飞牛音乐目录", "/music")
+	for _, configuredRoot := range strings.Split(os.Getenv("FINDREPEATEDSONG_BROWSE_ROOTS"), string(os.PathListSeparator)) {
 		appendRoot("已授权音乐目录", configuredRoot)
-	} else if homeDir, err := os.UserHomeDir(); err == nil {
-		// Never fall back to `/`: it exposes host/container paths unrelated to a
-		// music library. The user home is a practical desktop default until a
-		// dedicated music mount is configured.
-		appendRoot("本机音乐目录", homeDir)
+	}
+	appendRoot("已授权音乐目录", os.Getenv("FINDREPEATEDSONG_BROWSE_ROOT"))
+	for _, authorizedRoot := range strings.Split(os.Getenv("TRIM_DATA_ACCESSIBLE_PATHS"), string(os.PathListSeparator)) {
+		appendRoot("飞牛授权目录", authorizedRoot)
+	}
+
+	if len(roots) == 0 && os.Getenv("FINDREPEATEDSONG_FNOS_NATIVE") != "1" {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			// Never fall back to `/`: it exposes host/container paths unrelated to a
+			// music library. The user home is a practical desktop default until a
+			// dedicated music mount is configured.
+			appendRoot("本机音乐目录", homeDir)
+		}
 	}
 
 	for _, item := range []struct{ key, label string }{
@@ -430,7 +448,7 @@ func configuredBrowseRoots() []browseRoot {
 func apiBrowsePath(c *gin.Context) {
 	roots := configuredBrowseRoots()
 	if len(roots) == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "没有可浏览的目录，请先挂载音乐目录。"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "没有已授权的音乐目录。请到飞牛应用设置中的“授权目录”添加音乐目录，并保存后重启应用。"})
 		return
 	}
 
@@ -453,13 +471,13 @@ func apiBrowsePath(c *gin.Context) {
 		}
 	}
 	if !allowed {
-		c.JSON(http.StatusForbidden, gin.H{"error": "该目录不在已挂载或已配置的音乐目录中"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "该目录不在飞牛已授权的目录范围内，请在应用设置的“授权目录”中添加它。", "roots": roots})
 		return
 	}
 
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Cannot read directory: " + err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": "无法读取此目录，请确认飞牛应用已被授予该目录的访问权限：" + err.Error()})
 		return
 	}
 
