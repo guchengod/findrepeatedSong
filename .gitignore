@@ -32,3 +32,5 @@ data/*.db
 !data/.gitkeep
 dummy_music_test
 music
+*.fpk
+dist/

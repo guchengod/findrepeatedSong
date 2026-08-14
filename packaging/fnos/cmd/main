@@ -1,0 +1,20 @@
+#!/bin/bash
+
+CONTAINER_NAME="findrepeatedsong"
+
+case "$1" in
+  start|stop)
+    # fnOS manages Docker Compose lifecycle for docker-project resources.
+    exit 0
+    ;;
+  status)
+    if docker inspect "$CONTAINER_NAME" 2>/dev/null | grep -q '"Status": "running"'; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Unknown action: $1" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+    ;;
+esac

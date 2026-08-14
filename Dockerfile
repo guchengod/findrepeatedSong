@@ -1,5 +1,5 @@
 # Build Backend
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.26-alpine AS backend-builder
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -21,7 +21,7 @@ FROM alpine:latest
 RUN apk add --no-cache ca-certificates ffmpeg
 WORKDIR /app
 COPY --from=backend-builder /app/main .
-# In the project, Vite builds to ../backend/static/, but for Docker we take frontend/dist
-COPY --from=frontend-builder /app/dist ./static
+# Vite writes its production output to ../backend/static relative to /app.
+COPY --from=frontend-builder /backend/static ./static
 EXPOSE 8080
 CMD ["./main"]
