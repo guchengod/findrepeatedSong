@@ -107,6 +107,47 @@ func apiStartComplete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Completion started"})
 }
 
+func apiStartLyrics(c *gin.Context) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Path) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
+		return
+	}
+	path, err := filepath.Abs(req.Path)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		return
+	}
+	allowed := false
+	for _, root := range configuredBrowseRoots() {
+		if pathWithinRoot(path, root.Path) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Path is not within an accessible music directory"})
+		return
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path must be a readable directory"})
+		return
+	}
+	if !startLyricsJob(path) {
+		c.JSON(http.StatusConflict, gin.H{"error": "A lyrics completion job is already running"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Lyrics completion started"})
+}
+
+func apiGetLyrics(c *gin.Context) {
+	var records []LyricsRecord
+	db.Order("completed_at desc").Limit(100).Find(&records)
+	c.JSON(http.StatusOK, records)
+}
+
 // Existing Scan & Analyze APIs (slightly modified to support multiple paths)
 func apiStartScan(c *gin.Context) {
 	var req struct {

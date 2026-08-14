@@ -16,6 +16,8 @@ const configMeta: Record<string, { title: string; hint: string }> = {
   target_path: { title: '整理目标路径', hint: '整理后的歌曲将移动或复制到此目录' },
   mb_user_agent: { title: 'MusicBrainz 标识', hint: '访问元数据服务时使用的应用标识' },
   mb_api_key: { title: 'MusicBrainz API Key', hint: '可选访问令牌，仅用于本机向 MusicBrainz 发起请求' },
+  lyrics_provider: { title: '歌词来源', hint: '第一版支持 lrclib，用于查询缺失的歌词' },
+  lyrics_user_agent: { title: '歌词服务标识', hint: '访问 LRCLIB 时使用的应用标识' },
   default_delete_strategy: { title: '默认保留策略', hint: 'quality、size_desc、size_asc 的组合顺序' },
   scan_depth: { title: '最大扫描深度', hint: '限制目录递归层数，避免扫描到无关挂载目录' },
 };

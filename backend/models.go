@@ -41,6 +41,19 @@ type AppConfig struct {
 	Desc  string `json:"desc"`
 }
 
+// LyricsRecord records a sidecar lyric file generated for a local track. The
+// lyric text itself remains in the user's music directory instead of the app DB.
+type LyricsRecord struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	TrackPath   string    `json:"trackPath" gorm:"uniqueIndex"`
+	LyricsPath  string    `json:"lyricsPath"`
+	Provider    string    `json:"provider"`
+	Synced      bool      `json:"synced"`
+	Status      string    `json:"status"`
+	Message     string    `json:"message"`
+	CompletedAt time.Time `json:"completedAt"`
+}
+
 // RunRecord represents a single execution of a scheduled task.
 type RunRecord struct {
 	ID        string    `json:"id"`          // e.g. "ORG-20260324-143201"

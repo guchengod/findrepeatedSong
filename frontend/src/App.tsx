@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight,
   Menu, Globe,
   Check,
-  FileMusic, Search, HardDrive,
+  FileMusic, FileText, Search, HardDrive,
   Clock, Layers, Info,
   Sun, Moon, Library, X, ShieldCheck, RotateCcw, RefreshCw
 } from 'lucide-react';
@@ -66,6 +66,17 @@ interface TrashRecord {
   originalPath: string;
   size: number;
   createdAt: string;
+}
+
+interface LyricsRecord {
+  id: number;
+  trackPath: string;
+  lyricsPath: string;
+  provider: string;
+  synced: boolean;
+  status: 'completed' | 'skipped' | 'not_found' | 'empty' | 'failed';
+  message: string;
+  completedAt: string;
 }
 
 const API_BASE = '/api';
@@ -156,6 +167,9 @@ function App() {
   const [orgStatus, setOrgStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
   const [completeStatus, setCompleteStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
   const [completeLogs, setCompleteLogs] = useState<string[]>([]);
+  const [lyricsStatus, setLyricsStatus] = useState({ isRunning: false, processed: 0, total: 0, status: '' });
+  const [lyricsLogs, setLyricsLogs] = useState<string[]>([]);
+  const [lyricsRecords, setLyricsRecords] = useState<LyricsRecord[]>([]);
   const [autoProgress, setAutoProgress] = useState({ isRunning: false, percent: 0, message: '' });
 
   const [duplicateGroups, setDuplicateGroups] = useState<SongFile[][]>([]);
@@ -185,6 +199,7 @@ function App() {
     loadSchedules();
     loadGroups();
     loadTrash();
+    loadLyrics();
 
     // Theme initialization
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -267,6 +282,13 @@ function App() {
                 setCompleteLogs(prev => [data.detail, ...prev].slice(0, 100));
               }
               break;
+            case 'lyrics':
+              setLyricsStatus(data);
+              if (data.detail) {
+                setLyricsLogs(prev => [data.detail, ...prev].slice(0, 100));
+              }
+              if (!data.isRunning) loadLyrics();
+              break;
             case 'auto_delete':
               setAutoProgress(data);
               if (!data.isRunning) loadGroups();
@@ -304,6 +326,11 @@ function App() {
   const loadTrash = async () => {
     const response = await axios.get<TrashRecord[]>(`${API_BASE}/trash`);
     setTrashRecords(response.data || []);
+  };
+
+  const loadLyrics = async () => {
+    const response = await axios.get<LyricsRecord[]>(`${API_BASE}/lyrics`);
+    setLyricsRecords(response.data || []);
   };
 
   useEffect(() => {
@@ -636,6 +663,13 @@ function App() {
       await axios.post(`${API_BASE}/complete`, { path });
     };
 
+    const startLyrics = async () => {
+      const path = getConfig(selectedPaths[0]);
+      if (!path) return alert('请先选择一个音乐目录');
+      setLyricsLogs([]);
+      await axios.post(`${API_BASE}/lyrics`, { path });
+    };
+
     return (
       <div className="max-w-4xl space-y-6">
         <div className="flex justify-between items-end">
@@ -674,7 +708,10 @@ function App() {
                   </div>
                   <PathBrowser
                     value={getConfig(selectedPaths[0])}
-                    onChange={(path) => { axios.post(`${API_BASE}/config`, { key: selectedPaths[0], value: path }); }}
+                    onChange={async (path) => {
+                      await axios.post(`${API_BASE}/config`, { key: selectedPaths[0], value: path });
+                      await loadConfigs();
+                    }}
                   />
                 </div>
               </div>
@@ -690,6 +727,52 @@ function App() {
                 {completeStatus.isRunning ? <Loader2 className="mr-2 animate-spin"/> : <Sparkles className="mr-2"/>}
                 {t('completer.start')}
               </Button>
+            </Card>
+
+            <Card className="p-6 space-y-5 border-blue-100 bg-blue-50/25">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-primary/10 p-2 text-primary"><FileText size={19} /></div>
+                  <div>
+                    <h2 className="text-base font-bold">歌词补全</h2>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">优先保留现有 .lrc 文件；缺失时从 LRCLIB 匹配，并安全写入歌曲同目录。</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="icon" onClick={loadLyrics} aria-label="刷新歌词记录"><RefreshCw className="h-4 w-4" /></Button>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-md border bg-background/70 px-4 py-3 text-xs">
+                <span className="text-muted-foreground">当前来源</span>
+                <span className="font-mono font-semibold text-primary">{getConfig('lyrics_provider') || 'lrclib'}</span>
+              </div>
+
+              <Button size="lg" className="w-full" disabled={lyricsStatus.isRunning} onClick={startLyrics}>
+                {lyricsStatus.isRunning ? <Loader2 className="mr-2 animate-spin" /> : <FileText className="mr-2" />}
+                {lyricsStatus.isRunning ? `${lyricsStatus.processed} / ${lyricsStatus.total} 正在补全歌词` : '开始补全歌词'}
+              </Button>
+
+              {lyricsLogs.length > 0 && (
+                <div className="overflow-hidden rounded-md border bg-background">
+                  <div className="border-b bg-muted/50 px-4 py-2 text-xs font-bold">本次歌词补全</div>
+                  <div className="max-h-56 space-y-1 overflow-y-auto px-4 py-2 font-mono text-[11px]">
+                    {lyricsLogs.map((log, index) => <p key={index} className={cn(log.includes('✅') ? 'text-emerald-700' : log.includes('❌') ? 'text-destructive' : 'text-muted-foreground')}>{log}</p>)}
+                  </div>
+                </div>
+              )}
+
+              {lyricsRecords.length > 0 && (
+                <div className="overflow-hidden rounded-md border bg-background">
+                  <div className="border-b bg-muted/50 px-4 py-2 text-xs font-bold">最近歌词记录</div>
+                  <div className="divide-y">
+                    {lyricsRecords.slice(0, 5).map(record => (
+                      <div key={record.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs">
+                        <div className="min-w-0"><p className="truncate font-medium">{record.trackPath.split('/').pop()}</p><p className="truncate text-muted-foreground">{record.message}</p></div>
+                        <span className={cn('shrink-0 rounded px-2 py-1 text-[10px] font-bold', record.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : record.status === 'skipped' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700')}>{record.synced ? '同步歌词' : record.status === 'completed' ? '已保存' : record.status === 'skipped' ? '已保留' : '未匹配'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </Card>
 
             {completeLogs.length > 0 && (
@@ -729,6 +812,16 @@ function App() {
                      <span className="text-xs font-bold uppercase tracking-tighter italic">Waiting...</span>
                   </div>
                 )}
+             </Card>
+
+             <Card className="p-4 space-y-4">
+                <h3 className="text-sm font-bold">歌词补全状态</h3>
+                {lyricsStatus.isRunning ? (
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{lyricsStatus.status}</span><span className="font-mono">{lyricsStatus.processed} / {lyricsStatus.total}</span></div>
+                    <Progress value={lyricsStatus.total > 0 ? (lyricsStatus.processed / lyricsStatus.total) * 100 : 0} />
+                  </div>
+                ) : <p className="text-xs leading-relaxed text-muted-foreground">歌词以 .lrc 文件保存，不会覆盖已有歌词或修改原始音频。</p>}
              </Card>
 
              <Card className="p-4 space-y-2">

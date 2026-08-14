@@ -34,7 +34,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{}, &TrashRecord{})
+	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{}, &TrashRecord{}, &LyricsRecord{})
 
 	// Seed default data
 	seedData()
@@ -68,6 +68,8 @@ func main() {
 
 		// Completer
 		api.POST("/complete", apiStartComplete)
+		api.POST("/lyrics", apiStartLyrics)
+		api.GET("/lyrics", apiGetLyrics)
 
 		// Schedules
 		api.GET("/schedules", apiGetSchedules)
@@ -113,6 +115,8 @@ func seedData() {
 		{Key: "target_path", Value: "", Desc: "Default target path for organization"},
 		{Key: "mb_user_agent", Value: "FindRepeatedSong/1.0.0", Desc: "User-Agent for MusicBrainz API"},
 		{Key: "mb_api_key", Value: "", Desc: "Optional MusicBrainz API access token"},
+		{Key: "lyrics_provider", Value: "lrclib", Desc: "Lyrics provider used for automatic completion"},
+		{Key: "lyrics_user_agent", Value: "FindRepeatedSong/1.0.0", Desc: "User-Agent for lyrics providers"},
 		{Key: "default_delete_strategy", Value: "quality,size_desc", Desc: "Default deletion strategy (comma separated: quality, size_desc, size_asc)"},
 		{Key: "scan_depth", Value: "10", Desc: "Maximum directory depth for scanning (default: 10)"},
 	}
