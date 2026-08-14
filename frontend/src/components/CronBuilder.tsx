@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ConfigProvider, theme } from 'antd';
 import cronstrue from 'cronstrue';
 import { useTranslation } from 'react-i18next';
@@ -77,6 +77,7 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
   const [cron, setCron] = useState(value || '0 0 * * *');
   const [humanReadable, setHumanReadable] = useState('');
   const [nextRuns, setNextRuns] = useState<Date[]>([]);
+  const lastSavedCron = useRef(value || '0 0 * * *');
   // qnn-react-cron is CJS — load dynamically so Vite bundles it via its ESM interop
   const [CronEditor, setCronEditor] = useState<React.ComponentType<Record<string, unknown>> | null>(null);
 
@@ -99,6 +100,7 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
 
   useEffect(() => {
     setCron(value);
+    lastSavedCron.current = value;
   }, [value]);
 
   useEffect(() => {
@@ -113,9 +115,10 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
 
   // Debounced auto-save when cron changes
   useEffect(() => {
-    if (!onSave) return;
+    if (!onSave || cron === lastSavedCron.current) return;
     const timer = setTimeout(() => {
       onSave(cron);
+      lastSavedCron.current = cron;
     }, 2000);
     return () => clearTimeout(timer);
   }, [cron, onSave]);
@@ -126,21 +129,14 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
   };
 
   return (
-    <div className="space-y-4">
+    <div className="cron-builder space-y-4">
       {/* Presets */}
       <div className="flex flex-wrap gap-2">
         {PRESETS.map((preset) => (
           <button
             key={preset.value}
             onClick={() => handlePresetClick(preset.value)}
-            className="cb-btn"
-            style={{
-              padding: '0.3rem 0.6rem',
-              fontSize: '10px',
-              background: cron === preset.value ? 'rgba(0, 240, 255, 0.1)' : 'transparent',
-              borderColor: cron === preset.value ? '#00f0ff' : 'rgba(0, 240, 255, 0.2)',
-              color: cron === preset.value ? '#00f0ff' : '#4a4a6a',
-            }}
+            className={`cron-preset ${cron === preset.value ? 'is-active' : ''}`}
           >
             {preset.label}
           </button>
@@ -150,19 +146,16 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
       {/* Cron Editor */}
       <ConfigProvider
         theme={{
-          algorithm: theme.darkAlgorithm,
+          algorithm: theme.defaultAlgorithm,
           token: {
-            colorPrimary: '#00f0ff',
-            borderRadius: 4,
+            colorPrimary: '#0a49c6',
+            colorBgContainer: '#ffffff',
+            colorBorder: '#dce4ef',
+            borderRadius: 6,
           },
         }}
       >
-        <div style={{
-          background: 'rgba(10, 10, 15, 0.8)',
-          border: '1px solid rgba(0, 240, 255, 0.15)',
-          borderRadius: '8px',
-          padding: '1rem',
-        }}>
+        <div className="cron-editor-surface">
           {CronEditor ? (
             <CronEditor
               value={cron}
@@ -183,52 +176,30 @@ export const CronBuilder: React.FC<CronBuilderProps> = ({ value, onChange, onSav
               footer={false}
             />
           ) : (
-            <div className="text-[#4a4a6a] text-xs font-mono py-4 text-center">Loading cron editor...</div>
+            <div className="text-muted-foreground text-xs py-4 text-center">正在加载时间设置…</div>
           )}
         </div>
       </ConfigProvider>
 
       {/* Human readable */}
       {humanReadable && (
-        <div style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '11px',
-          color: '#00f0ff',
-          padding: '0.5rem 0.75rem',
-          background: 'rgba(0, 240, 255, 0.05)',
-          border: '1px solid rgba(0, 240, 255, 0.1)',
-          borderRadius: '4px',
-        }}>
-          {'//'} {humanReadable}
+        <div className="cron-description">
+          {humanReadable}
         </div>
       )}
 
       {/* Next 5 runs */}
       {nextRuns.length > 0 && (
         <div className="space-y-1">
-          <div style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '9px',
-            color: '#4a4a6a',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            marginBottom: '0.25rem',
-          }}>
+          <div className="cron-next-label">
             {t('cronBuilder.next5Runs')}
           </div>
           {nextRuns.map((run, i) => (
             <div
               key={i}
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                color: '#39ff14',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-              }}
+              className="cron-next-run"
             >
-              <span style={{ color: '#4a4a6a' }}>#{i + 1}</span>
+              <span>#{i + 1}</span>
               {run.toLocaleString()}
             </div>
           ))}

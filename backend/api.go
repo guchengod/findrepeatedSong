@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -288,51 +287,85 @@ func apiEmptyTrash(c *gin.Context) {
 }
 
 // --- Browse Path API ---
-func apiBrowsePath(c *gin.Context) {
-	dir := c.Query("dir")
+type browseRoot struct {
+	Label string `json:"label"`
+	Path  string `json:"path"`
+}
 
-	// Security: resolve the path and check it's within allowed roots
+func pathWithinRoot(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
+}
+
+func configuredBrowseRoots() []browseRoot {
+	roots := make([]browseRoot, 0, 3)
+	appendRoot := func(label, path string) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return
+		}
+		if info, err := os.Stat(absolute); err != nil || !info.IsDir() {
+			return
+		}
+		for _, root := range roots {
+			if root.Path == absolute {
+				return
+			}
+		}
+		roots = append(roots, browseRoot{Label: label, Path: absolute})
+	}
+
+	// fnOS packages mount the folder chosen in the install wizard at /music. Keep
+	// browsing within mounted folders there, rather than exposing container paths.
+	if info, err := os.Stat("/music"); err == nil && info.IsDir() {
+		appendRoot("飞牛音乐目录", "/music")
+	} else {
+		appendRoot("本机文件系统", string(os.PathSeparator))
+	}
+
+	for _, item := range []struct{ key, label string }{
+		{"source_path", "当前音乐库"},
+		{"target_path", "整理目标目录"},
+	} {
+		var config AppConfig
+		if err := db.Where("key = ?", item.key).First(&config).Error; err == nil {
+			appendRoot(item.label, config.Value)
+		}
+	}
+	return roots
+}
+
+func apiBrowsePath(c *gin.Context) {
+	roots := configuredBrowseRoots()
+	if len(roots) == 0 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "没有可浏览的目录，请先挂载音乐目录。"})
+		return
+	}
+
+	dir := strings.TrimSpace(c.Query("dir"))
+	if dir == "" {
+		dir = roots[0].Path
+	}
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的目录路径"})
 		return
 	}
-	// Normalize to prevent /../ bypass of prefix check
 	absDir = filepath.Clean(absDir)
 
-	// Get allowed roots from config
-	var sourcePath, targetPath string
-	var cfg AppConfig
-	if err := db.Where("key = ?", "source_path").First(&cfg).Error; err == nil {
-		sourcePath, _ = filepath.Abs(cfg.Value)
-	}
-	if err := db.Where("key = ?", "target_path").First(&cfg).Error; err == nil {
-		targetPath, _ = filepath.Abs(cfg.Value)
-	}
-
-	// Allow root directory listing, or subdirectories of configured paths
-	allowed := absDir == "/" || absDir == ""
-	if !allowed && sourcePath != "" {
-		if strings.HasPrefix(absDir, sourcePath) {
+	allowed := false
+	for _, root := range roots {
+		if pathWithinRoot(absDir, root.Path) {
 			allowed = true
+			break
 		}
 	}
-	if !allowed && targetPath != "" {
-		if strings.HasPrefix(absDir, targetPath) {
-			allowed = true
-		}
-	}
-
 	if !allowed {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: path not within configured source or target paths"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "该目录不在已挂载或已配置的音乐目录中"})
 		return
-	}
-
-	if absDir == "" || absDir == "/" {
-		// List root volumes on darwin, or root on linux
-		if runtime.GOOS == "darwin" {
-			absDir = "/"
-		}
 	}
 
 	entries, err := os.ReadDir(absDir)
@@ -373,9 +406,22 @@ func apiBrowsePath(c *gin.Context) {
 		return result[i].Name < result[j].Name
 	})
 
+	parent := filepath.Dir(absDir)
+	parentAllowed := false
+	for _, root := range roots {
+		if pathWithinRoot(parent, root.Path) && parent != absDir {
+			parentAllowed = true
+			break
+		}
+	}
+	if !parentAllowed {
+		parent = ""
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"entries": result,
-		"parent":  filepath.Dir(absDir),
+		"parent":  parent,
+		"path":    absDir,
+		"roots":   roots,
 	})
 }
 

@@ -112,6 +112,7 @@ func seedData() {
 		{Key: "source_path", Value: "", Desc: "Default source path for music"},
 		{Key: "target_path", Value: "", Desc: "Default target path for organization"},
 		{Key: "mb_user_agent", Value: "FindRepeatedSong/1.0.0", Desc: "User-Agent for MusicBrainz API"},
+		{Key: "mb_api_key", Value: "", Desc: "Optional MusicBrainz API access token"},
 		{Key: "default_delete_strategy", Value: "quality,size_desc", Desc: "Default deletion strategy (comma separated: quality, size_desc, size_asc)"},
 		{Key: "scan_depth", Value: "10", Desc: "Maximum directory depth for scanning (default: 10)"},
 	}

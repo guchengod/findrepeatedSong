@@ -21,15 +21,15 @@ import (
 )
 
 var (
-	mbClient = &http.Client{Timeout: 10 * time.Second}
+	mbClient  = &http.Client{Timeout: 10 * time.Second}
 	mbLastReq = time.Now()
-	mbMu sync.Mutex
+	mbMu      sync.Mutex
 )
 
 type MBRecordingResponse struct {
 	Recordings []struct {
-		Title  string `json:"title"`
-		Length int    `json:"length"` // length in ms
+		Title        string `json:"title"`
+		Length       int    `json:"length"` // length in ms
 		ArtistCredit []struct {
 			Name string `json:"name"`
 		} `json:"artist-credit"`
@@ -51,7 +51,15 @@ func mbRequest(uri string) ([]byte, error) {
 	}
 
 	req, _ := http.NewRequest("GET", uri, nil)
-	req.Header.Set("User-Agent", "FindRepeatedSong/1.0.0 ( contact@example.com )")
+	userAgent := "FindRepeatedSong/1.0.0 ( contact@example.com )"
+	var config AppConfig
+	if err := db.Where("key = ?", "mb_user_agent").First(&config).Error; err == nil && strings.TrimSpace(config.Value) != "" {
+		userAgent = config.Value
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if err := db.Where("key = ?", "mb_api_key").First(&config).Error; err == nil && strings.TrimSpace(config.Value) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(config.Value))
+	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := mbClient.Do(req)
@@ -145,7 +153,7 @@ func searchMetadata(titles []string, localDuration float64) (newArtist, newAlbum
 				break
 			}
 		}
-		
+
 		// If we found a good match for this candidate, stop trying other candidates
 		if bestMinDiff < 5.0 {
 			break
@@ -172,7 +180,7 @@ func writeMetadataToFile(path, artist, album, title string) error {
 
 	// Fallback to ffmpeg for formats like WAV where taglib might fail in Wasm
 	log.Printf("taglib failed for %s, falling back to ffmpeg: %v", path, err)
-	
+
 	tmpPath := path + ".tmp" + filepath.Ext(path)
 	cmd := exec.Command("ffmpeg", "-y", "-i", path,
 		"-metadata", "artist="+artist,
@@ -225,7 +233,9 @@ func getCandidateTitles(filename string) []string {
 	// Add parts from both the raw name and the cleaned name
 	toSplit := []string{name, nameClean}
 	for _, s := range toSplit {
-		if s == "" { continue }
+		if s == "" {
+			continue
+		}
 		for _, sep := range separators {
 			if strings.Contains(s, sep) {
 				parts := strings.Split(s, sep)
@@ -336,9 +346,9 @@ func doComplete(rootPath string) {
 			broadcastProgress("complete", gin.H{
 				"isRunning": true,
 				"processed": processed,
-				"total": 0,
-				"status": "Completing metadata...",
-				"detail": detailMsg,
+				"total":     0,
+				"status":    "Completing metadata...",
+				"detail":    detailMsg,
 			})
 		}
 	}

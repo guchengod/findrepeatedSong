@@ -861,7 +861,6 @@ function App() {
             <span className="header-divider" />
             {activeMenu.parent === 'home' && <button className="header-scan" onClick={() => navigate('deduper')}><Search size={18} />扫描重复项</button>}
             <button className="icon-button" onClick={toggleTheme} aria-label="切换主题">{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
-            <button className="settings-button" onClick={() => navigate('settings')}><Settings size={19} />设置</button>
           </div>
         </header>
         {mobileNavOpen && <nav className="mobile-navigation"><SidebarItem id="home" label="概览" icon={Activity} /><SidebarItem id="deduper" label="重复项" icon={Library} /><SidebarItem id="organizer" label="整理" icon={FolderTree} /><SidebarItem id="completer" label="元数据" icon={Sparkles} /><SidebarItem id="scheduler" label="自动化" icon={Calendar} /><SidebarItem id="settings" label="设置" icon={Settings} /></nav>}

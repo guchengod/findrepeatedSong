@@ -22,11 +22,11 @@ const formatDuration = (ms: number): string => {
 
 export const SchedulerHistory: React.FC<SchedulerHistoryProps> = ({ runs, taskName }) => {
   const { t } = useTranslation();
-  const statusColor = (status: string) => {
+  const statusClass = (status: string) => {
     switch (status) {
-      case 'COMPLETE': return '#39ff14';
-      case 'FAILED': return '#ff2d6a';
-      default: return '#ffb800';
+      case 'COMPLETE': return 'is-complete';
+      case 'FAILED': return 'is-failed';
+      default: return 'is-pending';
     }
   };
 
@@ -39,92 +39,47 @@ export const SchedulerHistory: React.FC<SchedulerHistoryProps> = ({ runs, taskNa
   };
 
   return (
-    <div style={{
-      background: 'rgba(0, 0, 0, 0.6)',
-      border: '1px solid rgba(0, 240, 255, 0.15)',
-      borderRadius: '8px',
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: '11px',
-      overflow: 'hidden',
-    }}>
+    <div className="scheduler-history">
       {/* Header */}
-      <div style={{
-        padding: '0.5rem 1rem',
-        borderBottom: '1px solid rgba(0, 240, 255, 0.1)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-      }}>
-        <span style={{ color: '#00f0ff', fontWeight: 700 }}>
-          {'>'} MISSION LOG: {taskName.toUpperCase().substring(0, 3)}
-        </span>
+      <div className="scheduler-history-header">
+        <span>执行记录 · {taskName}</span>
       </div>
 
       {/* Entries */}
-      <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+      <div className="scheduler-history-list">
         {runs.length === 0 ? (
-          <div style={{ padding: '1rem', color: '#4a4a6a', fontStyle: 'italic' }}>
-            {'>'} {t('schedulerHistory.noHistory')}
+          <div className="scheduler-history-empty">
+            {t('schedulerHistory.noHistory')}
           </div>
         ) : (
           runs.map((run, i) => (
             <div
               key={run.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '30px 1fr 80px 80px',
-                gap: '0.5rem',
-                padding: '0.4rem 1rem',
-                borderBottom: '1px solid rgba(255,255,255,0.03)',
-                alignItems: 'center',
-              }}
+              className="scheduler-history-row"
             >
               {/* Index */}
-              <span style={{ color: '#4a4a6a', fontSize: '9px' }}>
+              <span className="scheduler-history-index">
                 #{runs.length - i}
               </span>
 
               {/* ID + Timestamp */}
-              <div style={{ overflow: 'hidden' }}>
-                <div style={{
-                  color: statusColor(run.status),
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}>
+              <div className="scheduler-history-copy">
+                <div className={`scheduler-history-id ${statusClass(run.status)}`}>
                   {run.id}
                 </div>
-                <div style={{ color: '#4a4a6a', fontSize: '9px' }}>
+                <div>
                   {new Date(run.timestamp).toLocaleString()}
                 </div>
               </div>
 
               {/* Status Badge */}
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                padding: '0.15rem 0.4rem',
-                borderRadius: '3px',
-                fontSize: '9px',
-                fontWeight: 700,
-                background: `${statusColor(run.status)}15`,
-                border: `1px solid ${statusColor(run.status)}40`,
-                color: statusColor(run.status),
-                justifySelf: 'start',
-              }}>
-                <div style={{
-                  width: '4px',
-                  height: '4px',
-                  borderRadius: '50%',
-                  background: statusColor(run.status),
-                }} />
+              <div className={`scheduler-history-status ${statusClass(run.status)}`}>
+                <div />
                 {statusLabel(run.status)}
               </div>
 
               {/* Duration */}
-              <div style={{ color: '#4a4a6a', textAlign: 'right', fontSize: '10px' }}>
+              <div className="scheduler-history-duration">
                 {formatDuration(run.duration_ms)}
               </div>
             </div>
