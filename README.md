@@ -41,7 +41,7 @@
    将你的曲库挂载到容器的 `/music` 目录：
    ```bash
    docker run -d \
-     -p 8080:8080 \
+     -p 38491:38491 \
      -v "/path/to/your/music:/music" \
      -v "$(pwd)/data:/app/data" \
      --name music-deduper \
@@ -49,7 +49,7 @@
    ```
 
 3. **访问界面**:
-   打开浏览器访问 `http://localhost:8080`
+   打开浏览器访问 `http://localhost:38491`
 
 ### 本地开发
 

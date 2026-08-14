@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2.0] - 2026-08-14
+
+### Changed
+- 默认服务端口从 8080 调整为 38491，并同步更新 Docker、飞牛 fnOS 与原生启动包。
+
 ## [0.1.1.0] - 2026-03-24
 
 ### Security

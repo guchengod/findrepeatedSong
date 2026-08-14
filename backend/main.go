@@ -18,7 +18,7 @@ func main() {
 	var err error
 	dataDir := envOrDefault("FINDREPEATEDSONG_DATA_DIR", "data")
 	staticDir := envOrDefault("FINDREPEATEDSONG_STATIC_DIR", "static")
-	port := envOrDefault("FINDREPEATEDSONG_PORT", "8080")
+	port := envOrDefault("FINDREPEATEDSONG_PORT", "38491")
 
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatal(err)

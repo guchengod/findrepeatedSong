@@ -1,5 +1,5 @@
 appname=findrepeatedsong
-version=0.1.1
+version=0.1.2
 display_name=Music De-duplicator
 desc=音乐去重、整理与元数据补全工具。
 source=thirdparty
@@ -10,7 +10,7 @@ distributor=guchengod
 distributor_url=https://github.com/guchengod/findrepeatedSong
 desktop_uidir=ui
 desktop_applaunchname=findrepeatedsong.main
-service_port=8080
+service_port=38491
 checkport=true
 ctl_stop=true
 disable_authorization_path=true

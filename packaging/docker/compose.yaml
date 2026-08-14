@@ -1,10 +1,10 @@
 services:
   music-deduper:
-    image: ${FINDREPEATEDSONG_IMAGE:-findrepeatedsong:0.1.1}
+    image: ${FINDREPEATEDSONG_IMAGE:-findrepeatedsong:0.1.2}
     container_name: findrepeatedsong
     restart: unless-stopped
     ports:
-      - "${FINDREPEATEDSONG_PORT:-8080}:8080"
+      - "${FINDREPEATEDSONG_PORT:-38491}:38491"
     volumes:
       - "${FINDREPEATEDSONG_DATA_DIR:-./data}:/app/data"
       - "${FINDREPEATEDSONG_MUSIC_DIR:-./music}:/music:rw"
