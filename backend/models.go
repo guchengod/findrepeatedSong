@@ -21,6 +21,19 @@ type SongFile struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+// TrashRecord keeps enough information to restore a file that was removed from
+// a duplicate group. Files are moved into the app data directory rather than
+// being permanently deleted, so a destructive action has a recovery path.
+type TrashRecord struct {
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	SongFileID   uint      `json:"songFileId" gorm:"index"`
+	OriginalPath string    `json:"originalPath"`
+	TrashPath    string    `json:"trashPath"`
+	Filename     string    `json:"filename"`
+	Size         int64     `json:"size"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 type AppConfig struct {
 	ID    uint   `json:"id" gorm:"primaryKey"`
 	Key   string `json:"key" gorm:"uniqueIndex"`
@@ -30,11 +43,11 @@ type AppConfig struct {
 
 // RunRecord represents a single execution of a scheduled task.
 type RunRecord struct {
-	ID        string    `json:"id"`         // e.g. "ORG-20260324-143201"
-	Timestamp time.Time `json:"timestamp"`  // when it ran
-	Status    string    `json:"status"`     // "COMPLETE" or "FAILED"
+	ID        string    `json:"id"`          // e.g. "ORG-20260324-143201"
+	Timestamp time.Time `json:"timestamp"`   // when it ran
+	Status    string    `json:"status"`      // "COMPLETE" or "FAILED"
 	Duration  int64     `json:"duration_ms"` // how long it took
-	Error     *string   `json:"error"`      // error message if FAILED, nil if COMPLETE
+	Error     *string   `json:"error"`       // error message if FAILED, nil if COMPLETE
 }
 
 type ScheduleTask struct {

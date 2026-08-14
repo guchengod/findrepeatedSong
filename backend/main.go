@@ -12,11 +12,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-var db *gorm.DB
+var (
+	db         *gorm.DB
+	appDataDir = "data"
+)
 
 func main() {
 	var err error
 	dataDir := envOrDefault("FINDREPEATEDSONG_DATA_DIR", "data")
+	appDataDir = dataDir
 	staticDir := envOrDefault("FINDREPEATEDSONG_STATIC_DIR", "static")
 	port := envOrDefault("FINDREPEATEDSONG_PORT", "38491")
 
@@ -30,7 +34,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{})
+	db.AutoMigrate(&SongFile{}, &AppConfig{}, &ScheduleTask{}, &TrashRecord{})
 
 	// Seed default data
 	seedData()
@@ -55,6 +59,9 @@ func main() {
 		api.POST("/delete-file", apiDeleteFile)
 		api.POST("/auto-delete", apiAutoDelete)
 		api.POST("/full-pipeline", apiFullPipeline)
+		api.GET("/trash", apiGetTrash)
+		api.POST("/trash/restore", apiRestoreTrash)
+		api.POST("/trash/empty", apiEmptyTrash)
 
 		// Organizer
 		api.POST("/organize", apiStartOrganize)

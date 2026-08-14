@@ -9,17 +9,16 @@ import {
   Check,
   FileMusic, Search, HardDrive,
   Clock, Layers, Info,
-  Sun, Moon, Wifi, WifiOff
+  Sun, Moon, Library, X, ShieldCheck, RotateCcw, RefreshCw
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import './i18n';
 import { cn } from './lib/utils';
-import { Dashboard } from './components/Dashboard';
+import { ActivityItem, Dashboard } from './components/Dashboard';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { CronBuilder } from './components/CronBuilder';
 import { SchedulerHistory } from './components/SchedulerHistory';
 import { PathBrowser } from './components/PathBrowser';
-import './theme/cyberpunk.css';
 
 // --- Types ---
 
@@ -59,6 +58,14 @@ interface ScheduleTask {
   nextRun: string;
   runHistory: string;
   runHistoryArr?: RunRecord[];
+}
+
+interface TrashRecord {
+  id: number;
+  filename: string;
+  originalPath: string;
+  size: number;
+  createdAt: string;
 }
 
 const API_BASE = '/api';
@@ -129,6 +136,10 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, v
 
 type MenuItem = 'home' | 'deduper' | 'organizer' | 'completer' | 'scheduler';
 type ActiveMenu = { parent: MenuItem, child?: string };
+type PendingDeletion =
+  | { type: 'group'; groupId: string; keepId: number; filename: string; count: number }
+  | { type: 'file'; fileId: number; filename: string; count: number }
+  | { type: 'auto'; count: number };
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -136,7 +147,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configs, setConfigs] = useState<AppConfig[]>([]);
   const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [wsConnected, setWsConnected] = useState(false);
 
   // Progress States
@@ -150,6 +161,7 @@ function App() {
 
   const [duplicateGroups, setDuplicateGroups] = useState<SongFile[][]>([]);
   const [totalGroups, setTotalGroups] = useState(0);
+  const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -157,19 +169,34 @@ function App() {
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>(['source_path']);
   const [organizeMode, setOrganizeMode] = useState<'move' | 'copy'>('move');
+  const [duplicateQuery, setDuplicateQuery] = useState('');
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [activityLog, setActivityLog] = useState<ActivityItem[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('findrepeatedsong.activity') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     loadConfigs();
     loadSchedules();
     loadGroups();
+    loadTrash();
 
     // Theme initialization
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
-    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    const finalTheme = savedTheme || systemTheme;
+    const finalTheme = savedTheme || 'light';
     setTheme(finalTheme);
     applyTheme(finalTheme);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('findrepeatedsong.activity', JSON.stringify(activityLog.slice(0, 20)));
+  }, [activityLog]);
 
   const applyTheme = (t: 'light' | 'dark') => {
     if (t === 'dark') {
@@ -275,6 +302,11 @@ function App() {
     setTotalGroups(res.data.total || 0);
   };
 
+  const loadTrash = async () => {
+    const response = await axios.get<TrashRecord[]>(`${API_BASE}/trash`);
+    setTrashRecords(response.data || []);
+  };
+
   useEffect(() => {
     loadGroups();
   }, [page]);
@@ -292,6 +324,44 @@ function App() {
 
   const navigate = (menu: MenuItem, child?: string) => {
     setActiveMenu({ parent: menu, child: child });
+    setMobileNavOpen(false);
+  };
+
+  const addActivity = (entry: Omit<ActivityItem, 'id' | 'timestamp'>) => {
+    setActivityLog(current => [{
+      ...entry,
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    }, ...current].slice(0, 20));
+  };
+
+  const confirmDeletion = async () => {
+    if (!pendingDeletion) return;
+    setIsDeleting(true);
+    try {
+      if (pendingDeletion.type === 'group') {
+        await axios.post(`${API_BASE}/delete`, { groupId: pendingDeletion.groupId, keepId: pendingDeletion.keepId });
+        addActivity({ kind: 'trash', title: '重复组已移入回收站', detail: `已保留 ${pendingDeletion.filename}，其余 ${pendingDeletion.count - 1} 个文件可恢复。` });
+      } else if (pendingDeletion.type === 'file') {
+        await axios.post(`${API_BASE}/delete-file`, { id: pendingDeletion.fileId });
+        addActivity({ kind: 'trash', title: '文件已移入回收站', detail: `${pendingDeletion.filename} 可在回收站中恢复。` });
+      } else {
+        await axios.post(`${API_BASE}/auto-delete`, { strategies: selectedStrategies });
+        addActivity({ kind: 'trash', title: '安全批量处理已启动', detail: `将处理 ${pendingDeletion.count} 个重复组，文件会先移入回收站。` });
+      }
+      await loadGroups();
+      await loadTrash();
+      setPendingDeletion(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const restoreTrash = async (id: number) => {
+    const record = trashRecords.find(item => item.id === id);
+    await axios.post(`${API_BASE}/trash/restore`, { id });
+    addActivity({ kind: 'restore', title: '文件已从回收站恢复', detail: record ? `${record.filename} 已返回原始路径。` : '文件已返回原始路径。' });
+    await Promise.all([loadTrash(), loadGroups()]);
   };
 
   // --- Sub-Views ---
@@ -301,42 +371,31 @@ function App() {
       const paths = selectedPaths.map(p => getConfig(p)).filter(p => p !== '');
       if (paths.length === 0) return alert('Please select a path');
       await axios.post(`${API_BASE}/full-pipeline`, { paths, similarity });
-    };
-
-    const startAutoDelete = async () => {
-      await axios.post(`${API_BASE}/auto-delete`, { strategies: selectedStrategies });
-    };
-
-    const deleteGroup = async (groupId: string, keepId: number) => {
-      await axios.post(`${API_BASE}/delete`, { groupId, keepId });
-      loadGroups();
-    };
-
-    const deleteFile = async (id: number) => {
-      if (!confirm('Confirm delete?')) return;
-      await axios.post(`${API_BASE}/delete-file`, { id });
-      loadGroups();
+      addActivity({ kind: 'scan', title: '重复项扫描已启动', detail: `正在以 ${Math.round(similarity * 100)}% 相似度分析已选择的音乐路径。` });
     };
 
     const totalPages = Math.ceil(totalGroups / pageSize);
+    const filteredGroups = duplicateGroups.filter(group => group.some(file =>
+      [file.filename, file.artist, file.album, file.title, file.path].join(' ').toLowerCase().includes(duplicateQuery.toLowerCase())
+    ));
 
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-end">
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{t('deduper.title')}</h1>
             <p className="text-muted-foreground">{t('deduper.subtitle')}</p>
           </div>
-          <div className="flex gap-2">
-             <Button onClick={startCombinedSearch} disabled={pipelineProgress.isRunning}>
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:flex-nowrap">
+             <Button className="flex-1 whitespace-nowrap sm:flex-none" onClick={startCombinedSearch} disabled={pipelineProgress.isRunning}>
                 {pipelineProgress.isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4"/>}
                 {t('deduper.findDuplicates')}
              </Button>
-             <Button variant="destructive" onClick={startAutoDelete} disabled={autoProgress.isRunning || duplicateGroups.length === 0}>
+             <Button className="flex-1 whitespace-nowrap sm:flex-none" variant="destructive" onClick={() => setPendingDeletion({ type: 'auto', count: totalGroups })} disabled={autoProgress.isRunning || duplicateGroups.length === 0}>
                 {autoProgress.isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Trash2 className="mr-2 h-4 w-4"/>}
-                {t('deduper.autoDelete')}
+                安全批量处理
              </Button>
-             <Button variant="outline" size="icon" onClick={loadGroups}>
+             <Button className="sm:flex-none" variant="outline" size="icon" onClick={loadGroups}>
                 <Activity className="h-4 w-4" />
              </Button>
           </div>
@@ -418,13 +477,34 @@ function App() {
           </Card>
         )}
 
+        {trashRecords.length > 0 && (
+          <Card className="overflow-hidden border-emerald-200 bg-emerald-50/30">
+            <div className="flex items-center justify-between border-b border-emerald-100 px-5 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-900"><RotateCcw size={17} />回收站保护</div>
+              <span className="text-xs text-emerald-700">{trashRecords.length} 个文件可恢复</span>
+            </div>
+            <div className="divide-y divide-emerald-100">
+              {trashRecords.slice(0, 5).map(record => (
+                <div key={record.id} className="flex items-center justify-between gap-4 px-5 py-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium">{record.filename}</p><p className="truncate text-xs text-muted-foreground">{record.originalPath}</p></div>
+                  <Button size="sm" variant="outline" onClick={() => restoreTrash(record.id)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />恢复</Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {totalGroups > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
-                Showing {(page-1)*pageSize + 1}-{Math.min(page*pageSize, totalGroups)} of {totalGroups} {t('deduper.group')}s
+                显示 {(page-1)*pageSize + 1}-{Math.min(page*pageSize, totalGroups)} / {totalGroups} 个重复组
               </div>
               <div className="flex items-center gap-2">
+                <div className="relative hidden sm:block">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input value={duplicateQuery} onChange={event => setDuplicateQuery(event.target.value)} placeholder="筛选歌曲、艺术家或路径" className="h-9 w-56 rounded-md border bg-background pl-9 pr-3 text-xs outline-none focus:border-primary" />
+                </div>
                 <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -436,7 +516,7 @@ function App() {
             </div>
 
             <div className="grid gap-4">
-              {duplicateGroups.map((group, idx) => (
+            {filteredGroups.map((group, idx) => (
                 <Card key={idx} className="overflow-hidden">
                   <div className="bg-muted/50 px-4 py-2 border-b flex justify-between items-center">
                     <span className="text-xs font-bold uppercase text-muted-foreground">{t('deduper.group')} {(page-1)*pageSize + idx + 1}</span>
@@ -455,11 +535,11 @@ function App() {
                           </div>
                         </div>
                         <div className="flex gap-2 shrink-0 ml-4">
-                          <Button size="sm" variant="outline" onClick={() => deleteGroup(file.groupId, file.id)}>
+                          <Button size="sm" variant="outline" onClick={() => setPendingDeletion({ type: 'group', groupId: file.groupId, keepId: file.id, filename: file.filename, count: group.length })}>
                             {t('deduper.keep')}
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => deleteFile(file.id)}>
-                            {t('deduper.delete')}
+                          <Button size="sm" variant="destructive" onClick={() => setPendingDeletion({ type: 'file', fileId: file.id, filename: file.filename, count: 1 })}>
+                            移入回收站
                           </Button>
                         </div>
                       </div>
@@ -733,23 +813,17 @@ function App() {
       <button
         onClick={() => navigate(id)}
         className={cn(
-          "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all group",
-          isActive && !indent ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-          indent && !isActive && "pl-10 text-muted-foreground/70 hover:pl-12"
+          "library-nav-item",
+          isActive && !indent && "is-active",
+          indent && !isActive && "is-indented"
         )}
       >
-        <Icon size={18} className={cn("transition-colors", isActive && !indent ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+        <Icon size={19} strokeWidth={1.8} />
         <span>{label}</span>
-        {isActive && !indent && <ChevronRight className="ml-auto h-4 w-4" />}
+        {isActive && !indent && <ChevronRight className="nav-item-arrow" size={16} />}
       </button>
     );
   };
-
-  const SectionLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="text-[10px] font-bold text-muted-foreground uppercase px-3 mb-2 tracking-widest">
-      {children}
-    </div>
-  );
 
   const activeTabLabel = () => {
     if (activeMenu.parent === 'home') return t('app.home');
@@ -757,101 +831,65 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Sidebar (Desktop) */}
-      <aside className="hidden md:flex w-64 flex-col border-r bg-card/50 backdrop-blur-xl">
-        <div className="p-6 border-b flex items-center gap-3">
-          <div className="p-2 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/20">
-            <Activity size={20} />
-          </div>
-          <span className="font-black text-lg tracking-tighter uppercase italic">{t('app.title')}</span>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-1">
-          <SectionLabel>{t('app.mainMenu')}</SectionLabel>
-          <SidebarItem id="home" label={t('app.home')} icon={Activity} />
-          <SidebarItem id="deduper" label={t('app.deduper')} icon={Trash2} />
-          <SidebarItem id="organizer" label={t('app.organizer')} icon={FolderTree} />
-          <SidebarItem id="completer" label={t('app.completer')} icon={Sparkles} />
-          <SidebarItem id="scheduler" label={t('app.scheduler')} icon={Calendar} />
+    <div className="library-app-shell">
+      <aside className="library-sidebar">
+        <button className="library-brand" onClick={() => navigate('home')} aria-label="返回概览">
+          <span className="brand-mark"><Activity size={23} strokeWidth={2.2} /></span>
+          <span>{t('app.title')}</span>
+        </button>
+        <nav className="library-nav" aria-label="主导航">
+          <SidebarItem id="home" label="概览" icon={Activity} />
+          <SidebarItem id="deduper" label="重复项" icon={Library} />
+          <SidebarItem id="organizer" label="整理" icon={FolderTree} />
+          <SidebarItem id="completer" label="元数据" icon={Sparkles} />
+          <SidebarItem id="scheduler" label="自动化" icon={Calendar} />
         </nav>
-
-        <div className="p-4 border-t space-y-4">
-           <Button variant="outline" className="w-full justify-between" onClick={toggleLanguage}>
-              <div className="flex items-center gap-2">
-                <Globe size={14} />
-                <span className="text-xs">{i18n.language === 'en' ? 'English' : '简体中文'}</span>
-              </div>
-              <ChevronRight size={12} className="text-muted-foreground" />
-           </Button>
-
-           <div className="flex items-center gap-3 px-3">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-primary to-primary/50 flex items-center justify-center text-[10px] font-black">ADMIN</div>
-              <div className="flex flex-col">
-                 <span className="text-xs font-bold">Local Host</span>
-                 <span className="text-[10px] text-muted-foreground">v1.0.0-PRO</span>
-              </div>
-           </div>
+        <div className="sidebar-safety">
+          <ShieldCheck size={18} />
+          <div><strong>本地优先</strong><span>所有操作仅在本地进行</span></div>
         </div>
+        <div className="sidebar-storage"><span>可释放存储空间（估算）</span><strong>{totalGroups > 0 ? `${totalGroups} 组` : '尚未扫描'}</strong><button onClick={() => navigate('deduper')}><RefreshCw size={14} />重新计算</button></div>
+        <button className="language-switch" onClick={toggleLanguage}><Globe size={16} />{i18n.language === 'en' ? 'English' : '简体中文'}<ChevronRight size={15} /></button>
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Header */}
-        <header className="h-16 border-b flex items-center justify-between px-6 bg-card/50 backdrop-blur-xl shrink-0">
-           <div className="flex items-center gap-4">
-              <div className="md:hidden p-2 hover:bg-accent rounded-md">
-                 <Menu size={20} />
-              </div>
-              <div className="h-4 w-px bg-border hidden md:block mx-2" />
-              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                 <span>{t('app.title')}</span>
-                 <ChevronRight size={12} />
-                 <span className="text-foreground font-bold">{activeTabLabel()}</span>
-              </div>
-           </div>
-
-           <div className="flex items-center gap-2">
-              {/* WS Status */}
-              <div className="flex items-center gap-1.5">
-                {wsConnected ? (
-                  <Wifi size={12} className="text-green-500" />
-                ) : (
-                  <WifiOff size={12} className="text-destructive" />
-                )}
-                <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: wsConnected ? '#39ff14' : '#ff2d6a' }}>
-                  {wsConnected ? 'ONLINE' : 'OFFLINE'}
-                </span>
-              </div>
-
-              <div className="h-4 w-px bg-border mx-2" />
-
-              <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
-                 {theme === 'dark' ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-muted-foreground" />}
-              </Button>
-
-              <div className="h-4 w-px bg-border mx-2" />
-
-              <Button variant="ghost" size="icon" className="rounded-full" onClick={() => setSettingsOpen(true)}>
-                 <Settings size={20} className="text-muted-foreground" />
-              </Button>
-           </div>
+      <div className="library-main">
+        <header className="library-header">
+          <button className="mobile-menu-button" onClick={() => setMobileNavOpen(open => !open)} aria-label="打开导航"><Menu size={20} /></button>
+          <div className="mobile-brand">{t('app.title')}<span>· {activeTabLabel()}</span></div>
+          <div className="header-actions">
+            <span className={`header-status ${wsConnected ? 'is-online' : ''}`}><span />{wsConnected ? '本地音乐库 · 已连接' : '本地服务 · 正在连接'}</span>
+            <span className="header-divider" />
+            {activeMenu.parent === 'home' && <button className="header-scan" onClick={() => navigate('deduper')}><Search size={18} />扫描重复项</button>}
+            <button className="icon-button" onClick={toggleTheme} aria-label="切换主题">{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
+            <button className="settings-button" onClick={() => setSettingsOpen(true)}><Settings size={19} />设置</button>
+          </div>
         </header>
-
-        {/* Scrollable Main Section */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-10 bg-muted/20 custom-scrollbar">
-           <div className="max-w-7xl mx-auto animate-in fade-in duration-700 slide-in-from-bottom-2">
-              {activeMenu.parent === 'home' && <Dashboard onOpenSettings={() => setSettingsOpen(true)} />}
-              {activeMenu.parent === 'deduper' && renderDeduper()}
-              {activeMenu.parent === 'organizer' && renderOrganizer()}
-              {activeMenu.parent === 'completer' && !activeMenu.child && renderCompleter()}
-              {activeMenu.parent === 'scheduler' && renderScheduler()}
-           </div>
+        {mobileNavOpen && <nav className="mobile-navigation"><SidebarItem id="home" label="概览" icon={Activity} /><SidebarItem id="deduper" label="重复项" icon={Library} /><SidebarItem id="organizer" label="整理" icon={FolderTree} /><SidebarItem id="completer" label="元数据" icon={Sparkles} /><SidebarItem id="scheduler" label="自动化" icon={Calendar} /></nav>}
+        <main className="library-content custom-scrollbar">
+          <div className="content-width">
+            {activeMenu.parent === 'home' && <Dashboard onNavigate={navigate} activity={activityLog} connected={wsConnected} />}
+            {activeMenu.parent === 'deduper' && renderDeduper()}
+            {activeMenu.parent === 'organizer' && renderOrganizer()}
+            {activeMenu.parent === 'completer' && !activeMenu.child && renderCompleter()}
+            {activeMenu.parent === 'scheduler' && renderScheduler()}
+          </div>
         </main>
       </div>
 
-      {/* Settings Drawer */}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {pendingDeletion && (
+        <div className="safety-modal-backdrop" role="presentation">
+          <section className="safety-modal" role="dialog" aria-modal="true" aria-labelledby="safety-modal-title">
+            <button className="modal-close" onClick={() => setPendingDeletion(null)} aria-label="关闭"><X size={18} /></button>
+            <span className="safety-modal-icon"><Trash2 size={23} /></span>
+            <h2 id="safety-modal-title">先移入回收站，再确认处理</h2>
+            <p>{pendingDeletion.type === 'auto' ? `将按当前策略处理 ${pendingDeletion.count} 个重复组。` : pendingDeletion.type === 'group' ? `将保留“${pendingDeletion.filename}”，其余 ${pendingDeletion.count - 1} 个版本会移入回收站。` : `“${pendingDeletion.filename}”会被移入回收站。`}</p>
+            <div className="safety-callout"><RotateCcw size={18} /><span>文件不会立即永久删除，可在回收站恢复。</span></div>
+            <div className="modal-actions"><button className="secondary-action" onClick={() => setPendingDeletion(null)}>返回审核</button><button className="danger-action" onClick={confirmDeletion} disabled={isDeleting}>{isDeleting ? '正在处理…' : '确认移入回收站'}</button></div>
+          </section>
+        </div>
+      )}
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

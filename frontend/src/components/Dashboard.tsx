@@ -1,12 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import {
-  Activity, HardDrive, Layers,
-  Settings, WifiOff,
-  Cpu, FileMusic, Trash2, Sparkles
+  CheckCircle2,
+  ChevronRight,
+  FolderOpen,
+  History,
+  Library,
+  Music2,
+  RefreshCw,
+  Search,
+  Tags,
+  Trash2,
 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
-import '../theme/cyberpunk.css';
 
 const API_BASE = '/api';
 
@@ -15,405 +20,143 @@ interface Stats {
   total_duplicates: number;
   storage_used_gb: number;
   jobs_running: number;
-  last_updated: string;
 }
 
-interface Mission {
+interface TrashRecord {
+  id: number;
+  size: number;
+}
+
+export interface ActivityItem {
   id: string;
-  task: string;
-  status: string;
-  timestamp?: string;
+  kind: 'scan' | 'duplicate' | 'organize' | 'metadata' | 'trash' | 'restore';
+  title: string;
+  detail: string;
+  timestamp: string;
 }
 
-interface ActiveMission {
-  task: string;
-  stage?: string;
-  processed?: number;
-  total?: number;
-  percent?: number;
-  status?: string;
-  detail?: string;
-}
+type Destination = 'deduper' | 'organizer' | 'completer';
 
-// Format large numbers with commas
-const formatNumber = (n: number): string => {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-  if (n >= 1_000) return n.toLocaleString();
-  return String(n);
+const formatBytes = (bytes: number) => {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 };
 
-// Progress Beam Component
-const ProgressBeam: React.FC<{
-  value: number;
-  label: string;
-  color?: 'cyan' | 'pink' | 'green';
-  status?: string;
-}> = ({ value, label, color = 'cyan', status }) => {
-  const colorMap = {
-    cyan: { bar: 'linear-gradient(90deg, #00f0ff, rgba(0,240,255,0.7))', glow: '0 0 10px #00f0ff, 0 0 20px rgba(0,240,255,0.3)' },
-    pink: { bar: 'linear-gradient(90deg, #ff2d6a, rgba(255,45,106,0.7))', glow: '0 0 10px #ff2d6a, 0 0 20px rgba(255,45,106,0.3)' },
-    green: { bar: 'linear-gradient(90deg, #39ff14, rgba(57,255,20,0.7))', glow: '0 0 10px #39ff14, 0 0 20px rgba(57,255,20,0.3)' },
+export const Dashboard = ({
+  onNavigate,
+  activity,
+  connected,
+}: {
+  onNavigate: (destination: Destination) => void;
+  activity: ActivityItem[];
+  connected: boolean;
+}) => {
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [trash, setTrash] = useState<TrashRecord[]>([]);
+
+  const refresh = async () => {
+    const [statsResponse, trashResponse] = await Promise.allSettled([
+      axios.get<Stats>(`${API_BASE}/stats`),
+      axios.get<TrashRecord[]>(`${API_BASE}/trash`),
+    ]);
+    if (statsResponse.status === 'fulfilled') setStats(statsResponse.value.data);
+    if (trashResponse.status === 'fulfilled') setTrash(trashResponse.value.data);
   };
 
-  const isComplete = value >= 100;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-center">
-        <span className="cb-font-mono text-[10px] text-[#4a4a6a] uppercase tracking-widest">{label}</span>
-        <span className="cb-font-mono text-[10px] text-[#00f0ff]">{Math.round(value)}% {status && `— ${status}`}</span>
-      </div>
-      <div style={{
-        height: '6px',
-        background: 'rgba(0, 240, 255, 0.1)',
-        borderRadius: '3px',
-        overflow: 'hidden',
-        position: 'relative',
-      }}>
-        <div style={{
-          height: '100%',
-          width: `${Math.min(100, value)}%`,
-          background: colorMap[isComplete ? 'green' : color].bar,
-          borderRadius: '3px',
-          transition: 'width 0.3s ease',
-          boxShadow: colorMap[isComplete ? 'green' : color].glow,
-          position: 'relative',
-        }}>
-          {!isComplete && (
-            <div style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: '30px',
-              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6))',
-              animation: 'beam-shine 1.5s ease-in-out infinite',
-            }} />
-          )}
-        </div>
-      </div>
-      <style>{`
-        @keyframes beam-shine {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 1; }
-        }
-      `}</style>
-    </div>
-  );
-};
-
-// Mission Terminal Component
-const MissionTerminal: React.FC<{ missions: Mission[] }> = ({ missions }) => {
-  const { t } = useTranslation();
-  return (
-    <div style={{
-      background: 'rgba(0, 0, 0, 0.6)',
-      border: '1px solid rgba(0, 240, 255, 0.15)',
-      borderRadius: '8px',
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: '11px',
-      color: '#00f0ff',
-      padding: '1rem',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        position: 'absolute',
-        top: '0.75rem',
-        left: '0.75rem',
-        color: '#00f0ff',
-        opacity: 0.7,
-      }}>
-        {'>'}_
-      </div>
-      <div style={{ paddingLeft: '1.5rem' }}>
-        {missions.length === 0 ? (
-          <div style={{ color: '#4a4a6a', fontStyle: 'italic' }}>
-            {'>'} {t('dashboard.noRecentMissions')}
-          </div>
-        ) : (
-          missions.map((m, i) => (
-            <div
-              key={i}
-              style={{
-                marginBottom: '0.25rem',
-                color: m.status === 'COMPLETE' ? '#39ff14' : m.status === 'FAILED' ? '#ff2d6a' : '#ffb800',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {'>'} {m.id} {m.status} @ {m.timestamp || '—'}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Dashboard Component
-export const Dashboard: React.FC<{
-  onOpenSettings: () => void;
-}> = ({ onOpenSettings }) => {
-  const { t } = useTranslation();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [activeMission, setActiveMission] = useState<ActiveMission | null>(null);
-  const [recentMissions, setRecentMissions] = useState<Mission[]>([]);
-  const [wsConnected, setWsConnected] = useState(false);
-
-  // Fetch stats periodically
   useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/stats`);
-        setStats(res.data);
-      } catch (e) {
-        console.error('Failed to load stats', e);
-      }
-    };
-    loadStats();
-    const interval = setInterval(loadStats, 30000);
-    return () => clearInterval(interval);
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  // WebSocket for real-time mission updates
-  useEffect(() => {
-    let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:38491' : window.location.host;
-    const wsUrl = `${wsProtocol}//${host}/ws`;
-    let ws: WebSocket;
-    let reconnectTimeout: ReturnType<typeof setTimeout>;
-    let attempts = 0;
-
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        setWsConnected(true);
-        attempts = 0;
-      };
-      ws.onclose = () => {
-        setWsConnected(false);
-        attempts++;
-        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-        reconnectTimeout = setTimeout(connect, delay);
-      };
-      ws.onerror = () => ws.close();
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          const { topic, data } = msg;
-
-          if (topic === 'pipeline' || topic === 'organize' || topic === 'complete' || topic === 'scan' || topic === 'analyze' || topic === 'auto_delete') {
-            if (data.isRunning) {
-              const stage = topic === 'pipeline' ? data.stage : topic;
-              setActiveMission({ ...data, task: stage });
-            } else {
-              // Job completed — add to recent missions
-              const mission: Mission = {
-                id: `${topic.toUpperCase().substring(0, 3)}-${new Date().toTimeString().substring(0, 8).replace(/:/g, '')}`,
-                task: topic,
-                status: 'COMPLETE',
-                timestamp: new Date().toLocaleTimeString(),
-              };
-              setRecentMissions(prev => [mission, ...prev].slice(0, 10));
-              setActiveMission(null);
-            }
-          }
-        } catch (e) {
-          console.error('WS parse error', e);
-        }
-      };
-    };
-
-    connect();
-    return () => {
-      clearTimeout(reconnectTimeout);
-      ws?.close();
-    };
-  }, []);
-
-  const metricCards = [
-    {
-      label: t('dashboard.totalSongs'),
-      value: stats ? formatNumber(stats.total_songs) : '—',
-      icon: <FileMusic size={20} color="#00f0ff" />,
-      color: '#00f0ff',
-    },
-    {
-      label: t('dashboard.duplicates'),
-      value: stats ? formatNumber(stats.total_duplicates) : '—',
-      icon: <Layers size={20} color="#ff2d6a" />,
-      color: '#ff2d6a',
-    },
-    {
-      label: t('dashboard.storageUsed'),
-      value: stats ? `${stats.storage_used_gb.toFixed(1)} GB` : '—',
-      icon: <HardDrive size={20} color="#39ff14" />,
-      color: '#39ff14',
-    },
-    {
-      label: t('dashboard.jobsRunning'),
-      value: stats ? String(stats.jobs_running) : '0',
-      icon: <Cpu size={20} color="#ffb800" />,
-      color: '#ffb800',
-    },
+  const recoverable = useMemo(() => trash.reduce((sum, item) => sum + item.size, 0), [trash]);
+  const steps = [
+    { number: '1', label: '扫描重复项', detail: '查找完全或相似重复的音频文件', icon: Search, destination: 'deduper' as const },
+    { number: '2', label: '整理目录', detail: '规范文件夹结构与命名规则', icon: FolderOpen, destination: 'organizer' as const },
+    { number: '3', label: '补全元数据', detail: '修复缺失或不完整的标签信息', icon: Tags, destination: 'completer' as const },
   ];
+  const iconFor = {
+    scan: Search,
+    duplicate: Library,
+    organize: FolderOpen,
+    metadata: Tags,
+    trash: Trash2,
+    restore: History,
+  };
 
   return (
-    <div className="cb-grid-bg cb-scanlines min-h-full p-6 space-y-6">
-      {/* Signal Banner */}
-      {!wsConnected && (
-        <div className="cb-signal-banner">
-          <WifiOff size={12} style={{ display: 'inline', marginRight: '0.5rem' }} />
-          SIGNAL LOST — RECONNECTING...
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="cb-font-display text-2xl font-black tracking-wider text-[#00f0ff] cb-glow uppercase">
-            COMMAND DECK
-          </h1>
-          <p className="text-[#4a4a6a] text-xs cb-font-mono mt-1">
-            MUSIC ENGINE v1.0 // READY
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <div className={`cb-status-dot ${wsConnected ? 'green' : 'pink'}`} />
-            <span className="cb-font-mono text-[10px] text-[#4a4a6a] uppercase">
-              {wsConnected ? t('dashboard.online') : t('dashboard.offline')}
-            </span>
-          </div>
-          <button
-            onClick={onOpenSettings}
-            className="cb-btn cb-btn-primary"
-            style={{ padding: '0.4rem 0.75rem' }}
-          >
-            <Settings size={14} />
-            CONFIG
-          </button>
-        </div>
+    <section className="library-dashboard">
+      <div className="library-hero">
+        <h1>让音乐库保持整洁</h1>
+        <p>扫描重复、整理目录、补全元数据，让你的音乐库井然有序。</p>
       </div>
 
-      {/* Metric Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-        {metricCards.map((card, i) => (
-          <div key={i} className="cb-metric-card">
-            <div className="cb-metric-label">{card.label}</div>
-            <div
-              className="cb-metric-value cb-chromatic"
-              style={{ color: card.color, textShadow: `0 0 20px ${card.color}40` }}
-            >
-              {card.value}
-            </div>
-            <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '6px',
-                background: `${card.color}15`,
-                border: `1px solid ${card.color}30`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-                {card.icon}
+      <div className="workflow-rail" aria-label="音乐库工作流">
+        {steps.map((step, index) => {
+          const Icon = step.icon;
+          return (
+            <button className="workflow-step" key={step.number} onClick={() => onNavigate(step.destination)}>
+              <span className="workflow-index">{step.number}</span>
+              <span className="workflow-icon"><Icon size={31} strokeWidth={1.7} /></span>
+              <span className="workflow-copy"><strong>{step.label}</strong><small>{step.detail}</small></span>
+              <ChevronRight size={21} className="workflow-arrow" />
+              {index < steps.length - 1 && <span className="workflow-connector" />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dashboard-columns">
+        <section className="activity-panel">
+          <div className="panel-heading">
+            <h2>最近活动</h2>
+            <button className="text-action" onClick={() => onNavigate('deduper')}>查看全部</button>
+          </div>
+          <div className="activity-list">
+            {activity.length === 0 ? (
+              <div className="empty-activity">
+                <CheckCircle2 size={20} />
+                <span>音乐库已准备就绪，开始一次扫描以建立处理记录。</span>
               </div>
-            </div>
+            ) : activity.slice(0, 6).map((item) => {
+              const Icon = iconFor[item.kind];
+              return (
+                <div className="activity-row" key={item.id}>
+                  <span className={`activity-icon activity-${item.kind}`}><Icon size={18} /></span>
+                  <span className="activity-line" />
+                  <div className="activity-copy"><strong>{item.title}</strong><small>{item.detail}</small></div>
+                  <time>{item.timestamp}</time>
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </section>
 
-      {/* Mission Status Beam */}
-      {activeMission && (
-        <div className="cb-card cb-card-glow p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="cb-status-dot cyan" style={{ animation: 'cb-pulse 1s infinite' }} />
-            <span className="cb-font-mono text-xs text-[#00f0ff] uppercase tracking-widest">
-              {t('dashboard.activeMission')}: {activeMission.task?.toUpperCase()}
-            </span>
+        <section className="duplicate-panel">
+          <div className="panel-heading">
+            <div><h2>待处理重复组</h2><span className="count-chip">{stats?.total_duplicates ?? 0} 组</span></div>
+            <button className="text-action" onClick={() => onNavigate('deduper')}>查看全部</button>
           </div>
-
-          {activeMission.task === 'organize' && (
-            <ProgressBeam
-              value={(activeMission.total ?? 0) > 0 ? ((activeMission.processed ?? 0) / (activeMission.total ?? 1)) * 100 : 0}
-              label={activeMission.status || 'ORGANIZING...'}
-              color="cyan"
-            />
-          )}
-          {activeMission.task === 'complete' && (
-            <ProgressBeam
-              value={activeMission.percent || 50}
-              label={activeMission.status || 'COMPLETING...'}
-              color="cyan"
-            />
-          )}
-          {activeMission.task === 'pipeline' && activeMission.stage && (
-            <ProgressBeam
-              value={activeMission.percent || (activeMission.stage === 'scan' ? 50 : 75)}
-              label={`${activeMission.stage.toUpperCase()} — ${activeMission.status || ''}`}
-              color={activeMission.stage === 'scan' ? 'cyan' : 'pink'}
-            />
-          )}
-          {activeMission.task === 'analyze' && (
-            <ProgressBeam
-              value={activeMission.percent || 0}
-              label={activeMission.status || 'ANALYZING...'}
-              color="pink"
-            />
-          )}
-          {activeMission.task === 'auto_delete' && (
-            <ProgressBeam
-              value={activeMission.percent || 0}
-              label={activeMission.status || 'AUTO-DELETING...'}
-              color="pink"
-            />
-          )}
-        </div>
-      )}
-
-      {/* Recent Missions */}
-      <div className="space-y-3">
-        <div className="cb-font-mono text-[10px] text-[#4a4a6a] uppercase tracking-widest">
-          {t('dashboard.recentMissions')}
-        </div>
-        <MissionTerminal missions={recentMissions} />
+          <div className="duplicate-summary">
+            <span>待审核重复文件占用空间（估算）</span>
+            <strong>{stats ? `${stats.storage_used_gb.toFixed(2)} GB` : '—'}</strong>
+            <button className="primary-action" onClick={() => onNavigate('deduper')}><Search size={17} />开始审核</button>
+          </div>
+          <div className="duplicate-table-labels"><span>音乐库状态</span><span>歌曲数量</span><span>处理建议</span></div>
+          <div className="duplicate-table-row"><span><Music2 size={17} />已收录曲目</span><b>{stats?.total_songs ?? '—'}</b><button onClick={() => onNavigate('deduper')}>查看重复项 <ChevronRight size={15} /></button></div>
+          <div className="duplicate-table-row"><span><History size={17} />回收站保护</span><b>{trash.length} 项</b><button onClick={refresh}>刷新状态 <RefreshCw size={14} /></button></div>
+          <div className="duplicate-table-row"><span><Trash2 size={17} />可恢复空间</span><b>{formatBytes(recoverable)}</b><button onClick={() => onNavigate('deduper')}>管理回收站 <ChevronRight size={15} /></button></div>
+        </section>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'FIND DUPLICATES', icon: <Trash2 size={16} />, color: '#ff2d6a', desc: 'Scan & deduplicate' },
-          { label: 'ORGANIZE MUSIC', icon: <Sparkles size={16} />, color: '#00f0ff', desc: 'Structure files' },
-          { label: 'COMPLETE METADATA', icon: <Activity size={16} />, color: '#39ff14', desc: 'MusicBrainz lookup' },
-        ].map((action, i) => (
-          <button
-            key={i}
-            className="cb-card cb-card-glow p-4 text-left"
-            style={{ cursor: 'pointer', borderColor: `${action.color}30` }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = `${action.color}60`;
-              (e.currentTarget as HTMLElement).style.boxShadow = `0 0 20px ${action.color}20`;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = `${action.color}30`;
-              (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <div style={{ color: action.color }}>{action.icon}</div>
-              <span className="cb-font-mono text-xs font-bold uppercase tracking-wider" style={{ color: action.color }}>
-                {action.label}
-              </span>
-            </div>
-            <div className="text-[10px] text-[#4a4a6a]">{action.desc}</div>
-          </button>
-        ))}
-      </div>
-    </div>
+      <p className="local-first-note"><span className={connected ? 'connection-dot is-online' : 'connection-dot'} />所有操作均在本地执行，不会上传或分享您的音乐数据。</p>
+    </section>
   );
 };

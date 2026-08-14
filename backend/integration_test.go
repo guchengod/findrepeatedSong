@@ -15,13 +15,16 @@ func TestRealWorldPipeline(t *testing.T) {
 	dbFile := "data/test_songs.db"
 	os.Remove(dbFile) // Start fresh
 	os.MkdirAll("data", 0755)
-	
+
 	var err error
 	db, err = gorm.Open(sqlite.Open(dbFile), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.AutoMigrate(&SongFile{})
+	appDataDir = "data"
+	db.AutoMigrate(&SongFile{}, &TrashRecord{})
+	os.RemoveAll(filepath.Join(appDataDir, "trash"))
+	defer os.RemoveAll(filepath.Join(appDataDir, "trash"))
 
 	// 2. Generate dummy data in dummy_music
 	testDir := "../dummy_music_test"
@@ -68,7 +71,7 @@ func TestRealWorldPipeline(t *testing.T) {
 	// 4. Verification
 	var remaining []SongFile
 	db.Where("deleted = ?", false).Find(&remaining)
-	
+
 	if len(remaining) != 5 { // 1 from A + 1 from B + 3 Uniques
 		t.Errorf("Expected 5 files remaining in DB, got %d", len(remaining))
 	}
@@ -81,13 +84,14 @@ func TestOrganize(t *testing.T) {
 	dbFile := "data/test_org.db"
 	os.Remove(dbFile)
 	os.MkdirAll("data", 0755)
-	
+
 	var err error
 	db, err = gorm.Open(sqlite.Open(dbFile), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.AutoMigrate(&SongFile{})
+	appDataDir = "data"
+	db.AutoMigrate(&SongFile{}, &TrashRecord{})
 
 	sourceDir := "../dummy_org_source"
 	targetDir := "../dummy_org_target"

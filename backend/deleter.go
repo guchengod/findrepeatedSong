@@ -1,14 +1,17 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	"gorm.io/gorm"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 var (
@@ -22,6 +25,64 @@ var (
 
 func isLossless(ext string) bool {
 	return losslessExts[ext]
+}
+
+// moveToTrash moves a file into the app-managed recycle bin and records the
+// original location. Rename is preferred, with a copy/remove fallback for
+// music libraries mounted on a different filesystem.
+func moveToTrash(tx *gorm.DB, f SongFile) error {
+	if _, err := os.Stat(f.Path); err != nil {
+		if os.IsNotExist(err) {
+			return tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true).Error
+		}
+		return err
+	}
+
+	trashDir := filepath.Join(appDataDir, "trash")
+	if err := os.MkdirAll(trashDir, 0755); err != nil {
+		return err
+	}
+
+	name := fmt.Sprintf("%d-%s", time.Now().UnixNano(), filepath.Base(f.Path))
+	destination := filepath.Join(trashDir, name)
+	if err := os.Rename(f.Path, destination); err != nil {
+		if err := copyThenRemove(f.Path, destination); err != nil {
+			return err
+		}
+	}
+
+	record := TrashRecord{
+		SongFileID:   f.ID,
+		OriginalPath: f.Path,
+		TrashPath:    destination,
+		Filename:     f.Filename,
+		Size:         f.Size,
+	}
+	if err := tx.Create(&record).Error; err != nil {
+		return err
+	}
+	return tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true).Error
+}
+
+func copyThenRemove(source, destination string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Remove(source)
 }
 
 func doAutoDelete(strategies []string) {
@@ -124,18 +185,9 @@ func doAutoDelete(strategies []string) {
 					continue
 				}
 
-				err := os.Remove(f.Path)
-				if err != nil {
-					if os.IsNotExist(err) {
-						// File already gone — mark deleted in DB anyway
-						tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
-					} else {
-						// Real error — file still exists, DO NOT mark as deleted
-						log.Println("Error deleting file:", f.Path, err)
-					}
-					continue
+				if err := moveToTrash(tx, f); err != nil {
+					log.Println("Error moving file to recycle bin:", f.Path, err)
 				}
-				tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
 			}
 		}
 		return nil
@@ -172,18 +224,9 @@ func doManualDelete(groupID string, keepID uint) {
 					continue
 				}
 
-				err := os.Remove(f.Path)
-				if err != nil {
-					if os.IsNotExist(err) {
-						// File already gone — mark deleted in DB anyway
-						tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
-					} else {
-						// Real error — file still exists, DO NOT mark as deleted
-						log.Println("Error deleting file:", f.Path, err)
-					}
-					continue
+				if err := moveToTrash(tx, f); err != nil {
+					log.Println("Error moving file to recycle bin:", f.Path, err)
 				}
-				tx.Model(&SongFile{}).Where("id = ?", f.ID).Update("deleted", true)
 			}
 		}
 		return nil

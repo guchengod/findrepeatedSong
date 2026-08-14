@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // --- Settings API ---
@@ -39,13 +40,13 @@ func apiGetSchedules(c *gin.Context) {
 	db.Find(&tasks)
 	// Parse runHistory JSON string into array for frontend
 	type scheduleResponse struct {
-		ID         uint      `json:"id"`
-		Name       string    `json:"name"`
-		Cron       string    `json:"cron"`
-		IsActive   bool      `json:"isActive"`
-		LastRun    time.Time `json:"lastRun"`
-		NextRun    time.Time `json:"nextRun"`
-		RunHistory string    `json:"runHistory"`
+		ID            uint        `json:"id"`
+		Name          string      `json:"name"`
+		Cron          string      `json:"cron"`
+		IsActive      bool        `json:"isActive"`
+		LastRun       time.Time   `json:"lastRun"`
+		NextRun       time.Time   `json:"nextRun"`
+		RunHistory    string      `json:"runHistory"`
 		RunHistoryArr []RunRecord `json:"runHistoryArr"`
 	}
 	responses := make([]scheduleResponse, len(tasks))
@@ -157,11 +158,17 @@ func apiGetGroups(c *gin.Context) {
 
 	total := len(validGroupIDs)
 	start := (page - 1) * pageSize
-	if start < 0 { start = 0 }
-	if start > total { start = total }
-	
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+
 	end := start + pageSize
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 
 	var result [][]SongFile
 	if start < total {
@@ -194,10 +201,14 @@ func apiDeleteFile(c *gin.Context) {
 		return
 	}
 
-	os.Remove(f.Path)
-	db.Model(&f).Update("deleted", true)
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return moveToTrash(tx, f)
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to move file to recycle bin"})
+		return
+	}
 	refreshStats()
-	c.JSON(http.StatusOK, gin.H{"message": "Deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "Moved to recycle bin"})
 }
 
 func apiDeleteGroup(c *gin.Context) {
@@ -218,6 +229,62 @@ func apiAutoDelete(c *gin.Context) {
 	c.ShouldBindJSON(&req)
 	go doAutoDelete(req.Strategies)
 	c.JSON(http.StatusOK, gin.H{"message": "Started"})
+}
+
+// --- Recycle bin API ---
+func apiGetTrash(c *gin.Context) {
+	var records []TrashRecord
+	db.Order("created_at desc").Find(&records)
+	c.JSON(http.StatusOK, records)
+}
+
+func apiRestoreTrash(c *gin.Context) {
+	var req struct {
+		ID uint `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid recycle bin record"})
+		return
+	}
+
+	var record TrashRecord
+	if err := db.First(&record, req.ID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Recycle bin record not found"})
+		return
+	}
+	if _, err := os.Stat(record.OriginalPath); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Original path already exists"})
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(record.OriginalPath), 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create original directory"})
+		return
+	}
+	if err := os.Rename(record.TrashPath, record.OriginalPath); err != nil {
+		if err := copyThenRemove(record.TrashPath, record.OriginalPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to restore file"})
+			return
+		}
+	}
+	db.Transaction(func(tx *gorm.DB) error {
+		tx.Model(&SongFile{}).Where("id = ?", record.SongFileID).Update("deleted", false)
+		return tx.Delete(&record).Error
+	})
+	refreshStats()
+	c.JSON(http.StatusOK, gin.H{"message": "Restored"})
+}
+
+func apiEmptyTrash(c *gin.Context) {
+	var records []TrashRecord
+	db.Find(&records)
+	for _, record := range records {
+		if err := os.Remove(record.TrashPath); err != nil && !os.IsNotExist(err) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to permanently remove recycle bin contents"})
+			return
+		}
+	}
+	db.Where("1 = 1").Delete(&TrashRecord{})
+	c.JSON(http.StatusOK, gin.H{"message": "Recycle bin emptied"})
 }
 
 // --- Browse Path API ---
@@ -368,7 +435,7 @@ func apiGetStats(c *gin.Context) {
 		"total_songs":      statsCache.totalSongs,
 		"total_duplicates": statsCache.totalDuplicates,
 		"storage_used_gb":  statsCache.storageUsedGB,
-		"jobs_running":      GetActiveJobs(),
-		"last_updated":      statsCache.lastUpdated.Format(time.RFC3339),
+		"jobs_running":     GetActiveJobs(),
+		"last_updated":     statsCache.lastUpdated.Format(time.RFC3339),
 	})
 }
