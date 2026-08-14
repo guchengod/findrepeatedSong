@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import './i18n';
 import { cn } from './lib/utils';
 import { ActivityItem, Dashboard } from './components/Dashboard';
-import { SettingsDrawer } from './components/SettingsDrawer';
+import { SettingsPage } from './components/SettingsDrawer';
 import { CronBuilder } from './components/CronBuilder';
 import { SchedulerHistory } from './components/SchedulerHistory';
 import { PathBrowser } from './components/PathBrowser';
@@ -134,7 +134,7 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, v
 
 // --- Main App ---
 
-type MenuItem = 'home' | 'deduper' | 'organizer' | 'completer' | 'scheduler';
+type MenuItem = 'home' | 'deduper' | 'organizer' | 'completer' | 'scheduler' | 'settings';
 type ActiveMenu = { parent: MenuItem, child?: string };
 type PendingDeletion =
   | { type: 'group'; groupId: string; keepId: number; filename: string; count: number }
@@ -144,7 +144,6 @@ type PendingDeletion =
 function App() {
   const { t, i18n } = useTranslation();
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>({ parent: 'home' });
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [configs, setConfigs] = useState<AppConfig[]>([]);
   const [schedules, setSchedules] = useState<ScheduleTask[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -843,6 +842,7 @@ function App() {
           <SidebarItem id="organizer" label="整理" icon={FolderTree} />
           <SidebarItem id="completer" label="元数据" icon={Sparkles} />
           <SidebarItem id="scheduler" label="自动化" icon={Calendar} />
+          <SidebarItem id="settings" label="设置" icon={Settings} />
         </nav>
         <div className="sidebar-safety">
           <ShieldCheck size={18} />
@@ -861,10 +861,10 @@ function App() {
             <span className="header-divider" />
             {activeMenu.parent === 'home' && <button className="header-scan" onClick={() => navigate('deduper')}><Search size={18} />扫描重复项</button>}
             <button className="icon-button" onClick={toggleTheme} aria-label="切换主题">{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>
-            <button className="settings-button" onClick={() => setSettingsOpen(true)}><Settings size={19} />设置</button>
+            <button className="settings-button" onClick={() => navigate('settings')}><Settings size={19} />设置</button>
           </div>
         </header>
-        {mobileNavOpen && <nav className="mobile-navigation"><SidebarItem id="home" label="概览" icon={Activity} /><SidebarItem id="deduper" label="重复项" icon={Library} /><SidebarItem id="organizer" label="整理" icon={FolderTree} /><SidebarItem id="completer" label="元数据" icon={Sparkles} /><SidebarItem id="scheduler" label="自动化" icon={Calendar} /></nav>}
+        {mobileNavOpen && <nav className="mobile-navigation"><SidebarItem id="home" label="概览" icon={Activity} /><SidebarItem id="deduper" label="重复项" icon={Library} /><SidebarItem id="organizer" label="整理" icon={FolderTree} /><SidebarItem id="completer" label="元数据" icon={Sparkles} /><SidebarItem id="scheduler" label="自动化" icon={Calendar} /><SidebarItem id="settings" label="设置" icon={Settings} /></nav>}
         <main className="library-content custom-scrollbar">
           <div className="content-width">
             {activeMenu.parent === 'home' && <Dashboard onNavigate={navigate} activity={activityLog} connected={wsConnected} />}
@@ -872,11 +872,10 @@ function App() {
             {activeMenu.parent === 'organizer' && renderOrganizer()}
             {activeMenu.parent === 'completer' && !activeMenu.child && renderCompleter()}
             {activeMenu.parent === 'scheduler' && renderScheduler()}
+            {activeMenu.parent === 'settings' && <SettingsPage />}
           </div>
         </main>
       </div>
-
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {pendingDeletion && (
         <div className="safety-modal-backdrop" role="presentation">

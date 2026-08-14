@@ -13,7 +13,8 @@ const resources = {
         "deduper": "Deduper",
         "organizer": "Organizer",
         "completer": "Metadata Completer",
-        "scheduler": "Scheduler"
+        "scheduler": "Scheduler",
+        "settings": "Settings"
       },
       "deduper": {
         "title": "Deduper",
@@ -113,7 +114,8 @@ const resources = {
         "deduper": "去重工具",
         "organizer": "音乐整理",
         "completer": "元数据补全",
-        "scheduler": "任务调度"
+        "scheduler": "任务调度",
+        "settings": "设置"
       },
       "deduper": {
         "title": "去重工具",
