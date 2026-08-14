@@ -1,0 +1,24 @@
+[
+  {
+    "stepTitle": "音乐目录",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_music_path",
+        "label": "音乐库目录",
+        "helpText": "该目录将挂载到应用内的 /music。请选择包含所有待扫描和整理音乐的上级目录。",
+        "initValue": "/vol1",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入音乐库目录"
+          },
+          {
+            "pattern": "^/.*",
+            "message": "目录必须为以 / 开头的绝对路径"
+          }
+        ]
+      }
+    ]
+  }
+]

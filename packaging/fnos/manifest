@@ -1,0 +1,17 @@
+appname=findrepeatedsong
+version=0.1.1
+display_name=Music De-duplicator
+desc=音乐去重、整理与元数据补全工具。
+source=thirdparty
+platform=all
+maintainer=guchengod
+maintainer_url=https://github.com/guchengod/findrepeatedSong
+distributor=guchengod
+distributor_url=https://github.com/guchengod/findrepeatedSong
+desktop_uidir=ui
+desktop_applaunchname=findrepeatedsong.main
+service_port=8080
+checkport=true
+ctl_stop=true
+disable_authorization_path=true
+changelog=首次发布飞牛 fnOS 安装包，支持音乐库去重、整理与元数据补全。
