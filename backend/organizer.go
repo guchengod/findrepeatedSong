@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -86,6 +89,7 @@ func doOrganize(targetRoot string, mode string, selectedPaths ...string) { // mo
 }
 
 func sanitizeFolderName(name string) string {
+	name = normalizeFolderNameText(name)
 	invalid := []string{"<", ">", ":", "\"", "/", "\\", "|", "?", "*"}
 	for _, char := range invalid {
 		name = strings.ReplaceAll(name, char, "_")
@@ -95,6 +99,20 @@ func sanitizeFolderName(name string) string {
 		return "Unknown"
 	}
 	return name
+}
+
+// normalizeFolderNameText makes legacy Chinese metadata safe for use in paths.
+// Modern tags are UTF-8, but older ID3v1/ID3v2 tags are commonly GBK encoded.
+func normalizeFolderNameText(name string) string {
+	if !utf8.ValidString(name) {
+		if decoded, err := simplifiedchinese.GBK.NewDecoder().String(name); err == nil && utf8.ValidString(decoded) {
+			name = decoded
+		} else {
+			name = strings.ToValidUTF8(name, "")
+		}
+	}
+
+	return norm.NFC.String(name)
 }
 
 func moveFile(sourcePath, destPath string) error {
