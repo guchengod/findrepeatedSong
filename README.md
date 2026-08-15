@@ -1,6 +1,6 @@
 # Music De-duplicator (高音质音乐去重工具)
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![React](https://img.shields.io/badge/React-18.2-61DAFB?style=flat&logo=react)](https://react.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat&logo=docker)](https://www.docker.com/)
 
@@ -31,6 +31,12 @@
 - **部署**: Docker (Multi-stage Build)
 
 ## 🚀 快速开始
+
+### 运行环境
+
+- Docker（推荐），或 Go 1.26+ 与 Node.js 20+
+- Docker 运行时，请将音乐目录挂载到容器内，并在页面中使用容器内路径（例如 `/music`）
+- 元数据补全依赖网络访问 MusicBrainz；写入部分音频格式标签时依赖容器内的 `ffmpeg`
 
 ### 使用 Docker (推荐)
 
@@ -69,6 +75,17 @@ npm install
 npm run dev
 ```
 
+前端开发服务器默认将 API 请求代理到后端；后端运行后，访问终端输出的本地开发地址即可。
+
+### 测试
+
+```bash
+cd backend
+go test ./...
+```
+
+测试会在项目目录下创建临时的测试音乐和 SQLite 数据库，并在结束时清理音乐文件。
+
 ## 📖 使用指南
 
 1. **Step 1: 扫描 (Scan)**
@@ -88,6 +105,23 @@ npm run dev
    - 通过 MusicBrainz API 自动获取并写入歌曲元数据。
 6. **定时任务 (Scheduler)**
    - 配置 cron 表达式，自动执行扫描、分析、自动清理等任务。
+
+## 🔌 服务接口
+
+后端默认监听 `http://localhost:8080`。主要接口均以 `/api` 为前缀：
+
+- 扫描与分析：`POST /scan`、`POST /analyze`、`GET /groups`
+- 清理：`POST /delete`、`POST /delete-file`、`POST /auto-delete`
+- 自动化：`POST /full-pipeline`、`POST /organize`、`POST /complete`
+- 配置与状态：`GET|POST /config`、`GET|POST /schedules`、`GET /stats`
+
+长耗时任务的进度通过 WebSocket 端点 `/ws` 推送给前端。
+
+## 💾 数据与部署
+
+- SQLite 数据库存储在 `data/songs.db`；Docker 部署时请将宿主机目录挂载到 `/app/data`，以保留扫描记录、配置和任务。
+- 后端会将前端构建产物从 `backend/static` 提供为单页应用；生产环境只需暴露 `8080` 端口。
+- 不要将真实音乐、SQLite 数据库或生成的测试文件提交到仓库。
 
 ## ⚠️ 注意事项
 
